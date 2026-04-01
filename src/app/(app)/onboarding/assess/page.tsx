@@ -76,7 +76,10 @@ export default function AssessPage() {
                 const updated = [...prev];
                 const last = updated[updated.length - 1];
                 if (last.role === "assistant") {
-                  last.content += parsed.data;
+                  return [
+                    ...updated.slice(0, -1),
+                    { ...last, content: last.content + parsed.data },
+                  ];
                 }
                 return updated;
               });
