@@ -39,7 +39,7 @@ export async function POST(req: Request) {
   try {
     const response = await client.messages.create({
       model: "claude-sonnet-4-20250514",
-      max_tokens: 4000,
+      max_tokens: 8000,
       system: slideGeneratorSystemPrompt,
       messages: [
         {
@@ -52,7 +52,14 @@ Module: ${module?.title || "Unknown Module"}
 Module description: ${module?.description || "N/A"}
 Lesson: ${lesson.title}
 
-Generate 8-12 slides following the lesson arc (Hook → Concept → Example → Application → Summary). Return ONLY a JSON array, no markdown fences.`,
+Generate exactly 8 slides following the lesson arc (Hook → Concept → Example → Application → Summary).
+
+IMPORTANT:
+- Return ONLY a valid JSON array, no markdown fences, no extra text
+- Keep each slide body to 3-5 bullet points (not full paragraphs)
+- Keep speakerNotes to 2-3 sentences max
+- Keep visualHint to 1 sentence
+- This must be valid, complete JSON that can be parsed`,
         },
       ],
     });
@@ -65,13 +72,30 @@ Generate 8-12 slides following the lesson arc (Hook → Concept → Example → 
 
     let slides;
     try {
-      // Try to find a JSON array in the response
+      // Try to find a complete JSON array in the response
       const jsonMatch = responseText.match(/\[[\s\S]*\]/);
       slides = jsonMatch ? JSON.parse(jsonMatch[0]) : [];
-    } catch (parseErr) {
-      console.error("Slide JSON parse error:", parseErr);
-      console.error("Raw response:", responseText.slice(0, 500));
-      slides = [];
+    } catch {
+      // JSON might be truncated — try to salvage what we can
+      console.error("Slide JSON truncated, attempting repair...");
+      try {
+        // Find the start of the array
+        const arrStart = responseText.indexOf("[");
+        if (arrStart !== -1) {
+          let text = responseText.slice(arrStart);
+          // Find the last complete object (ends with })
+          const lastCompleteObj = text.lastIndexOf("}");
+          if (lastCompleteObj !== -1) {
+            text = text.slice(0, lastCompleteObj + 1) + "]";
+            slides = JSON.parse(text);
+            console.log(`Repaired truncated JSON: recovered ${slides.length} slides`);
+          }
+        }
+      } catch (repairErr) {
+        console.error("JSON repair also failed:", repairErr);
+        slides = [];
+      }
+      if (!slides) slides = [];
     }
 
     if (slides.length === 0) {
