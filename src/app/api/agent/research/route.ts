@@ -50,38 +50,85 @@ export async function POST(req: Request) {
           detail: `Searching for authoritative sources on "${topic}"...`,
         });
 
-        const researchResponse = await client.messages.create({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 4000,
-          system: researchSystemPrompt,
-          tools: [
-            {
-              type: "web_search_20250305" as unknown as "computer_20250124",
-              name: "web_search",
-            } as unknown as Anthropic.Tool,
-          ],
-          messages: [
-            {
-              role: "user",
-              content: `Research this topic for curriculum design: "${topic}"${motivation ? `\nLearner motivation: ${motivation}` : ""}\nTarget difficulty: ${difficulty}\nAssessment summary: ${JSON.stringify(assessmentSummary)}`,
-            },
-          ],
-        });
+        let researchData: {
+          researchSummary: string;
+          sources: {
+            url?: string;
+            title?: string;
+            domain?: string;
+            relevanceNote?: string;
+          }[];
+        };
 
-        const researchText =
-          researchResponse.content
-            .filter((b): b is Anthropic.TextBlock => b.type === "text")
-            .map((b) => b.text)
-            .join("\n") || "";
-
-        let researchData;
         try {
-          const jsonMatch = researchText.match(/\{[\s\S]*\}/);
-          researchData = jsonMatch
-            ? JSON.parse(jsonMatch[0])
-            : { researchSummary: researchText, sources: [] };
-        } catch {
-          researchData = { researchSummary: researchText, sources: [] };
+          const researchResponse = await client.messages.create({
+            model: "claude-sonnet-4-20250514",
+            max_tokens: 4000,
+            system: researchSystemPrompt,
+            tools: [
+              {
+                type: "web_search_20250305",
+                name: "web_search",
+              },
+            ],
+            messages: [
+              {
+                role: "user",
+                content: `Research this topic for curriculum design: "${topic}"${motivation ? `\nLearner motivation: ${motivation}` : ""}\nTarget difficulty: ${difficulty}\nAssessment summary: ${JSON.stringify(assessmentSummary)}`,
+              },
+            ],
+          });
+
+          const researchText =
+            researchResponse.content
+              .filter((b): b is Anthropic.TextBlock => b.type === "text")
+              .map((b) => b.text)
+              .join("\n") || "";
+
+          try {
+            const jsonMatch = researchText.match(/\{[\s\S]*\}/);
+            researchData = jsonMatch
+              ? JSON.parse(jsonMatch[0])
+              : { researchSummary: researchText, sources: [] };
+          } catch {
+            researchData = { researchSummary: researchText, sources: [] };
+          }
+        } catch (err) {
+          // If web search fails, fall back to model knowledge only
+          console.error("Web search failed, falling back:", err);
+          send("step", {
+            step: 1,
+            total: 4,
+            label: "Researching your topic",
+            detail: "Web search unavailable, using AI knowledge...",
+          });
+
+          const fallbackResponse = await client.messages.create({
+            model: "claude-sonnet-4-20250514",
+            max_tokens: 4000,
+            system: researchSystemPrompt,
+            messages: [
+              {
+                role: "user",
+                content: `Research this topic for curriculum design using your knowledge (web search is not available): "${topic}"${motivation ? `\nLearner motivation: ${motivation}` : ""}\nTarget difficulty: ${difficulty}\nAssessment summary: ${JSON.stringify(assessmentSummary)}`,
+              },
+            ],
+          });
+
+          const fallbackText =
+            fallbackResponse.content
+              .filter((b): b is Anthropic.TextBlock => b.type === "text")
+              .map((b) => b.text)
+              .join("\n") || "";
+
+          try {
+            const jsonMatch = fallbackText.match(/\{[\s\S]*\}/);
+            researchData = jsonMatch
+              ? JSON.parse(jsonMatch[0])
+              : { researchSummary: fallbackText, sources: [] };
+          } catch {
+            researchData = { researchSummary: fallbackText, sources: [] };
+          }
         }
 
         const sourceCount = researchData.sources?.length || 0;
@@ -89,7 +136,9 @@ export async function POST(req: Request) {
           step: 1,
           total: 4,
           label: "Research complete",
-          detail: `Found ${sourceCount} source${sourceCount !== 1 ? "s" : ""}`,
+          detail: sourceCount > 0
+            ? `Found ${sourceCount} source${sourceCount !== 1 ? "s" : ""}`
+            : "Research summary generated",
         });
 
         // === STEP 2: Build curriculum ===
@@ -129,7 +178,18 @@ export async function POST(req: Request) {
             .map((b) => b.text)
             .join("\n") || "";
 
-        let curriculum;
+        let curriculum: {
+          title?: string;
+          collegeEquivalent?: string;
+          estimatedTotalHours?: number;
+          modules?: {
+            title: string;
+            description?: string;
+            lessons?: { title: string; estimatedDurationMinutes?: number }[];
+            quiz?: { title?: string; quizType?: string };
+          }[];
+          finalExam?: boolean;
+        } | null;
         try {
           const jsonMatch = curriculumText.match(/\{[\s\S]*\}/);
           curriculum = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
@@ -138,7 +198,7 @@ export async function POST(req: Request) {
         }
 
         if (!curriculum) {
-          send("error", { message: "Failed to generate curriculum" });
+          send("error", { message: "Failed to generate curriculum structure. Please try again." });
           controller.close();
           return;
         }
@@ -146,8 +206,7 @@ export async function POST(req: Request) {
         const moduleCount = curriculum.modules?.length || 0;
         const lessonCount =
           curriculum.modules?.reduce(
-            (sum: number, m: { lessons?: unknown[] }) =>
-              sum + (m.lessons?.length || 0),
+            (sum, m) => sum + (m.lessons?.length || 0),
             0
           ) || 0;
 
@@ -184,7 +243,16 @@ export async function POST(req: Request) {
             .map((b) => b.text)
             .join("\n") || "";
 
-        let schedule;
+        let schedule: {
+          endDate?: string;
+          schedule?: {
+            type: string;
+            moduleIndex: number;
+            lessonIndex?: number;
+            quizType?: string;
+            date: string;
+          }[];
+        } | null;
         try {
           const jsonMatch = scheduleText.match(/\{[\s\S]*\}/);
           schedule = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
@@ -228,7 +296,8 @@ export async function POST(req: Request) {
           .single();
 
         if (courseError || !course) {
-          send("error", { message: "Failed to create course" });
+          console.error("Course insert error:", courseError);
+          send("error", { message: "Failed to save course to database" });
           controller.close();
           return;
         }
@@ -236,26 +305,19 @@ export async function POST(req: Request) {
         // Save sources
         if (researchData.sources && researchData.sources.length > 0) {
           await supabase.from("sources").insert(
-            researchData.sources.map(
-              (s: {
-                url?: string;
-                title?: string;
-                domain?: string;
-                relevanceNote?: string;
-              }) => ({
-                course_id: course.id,
-                url: s.url || null,
-                title: s.title || null,
-                domain: s.domain || null,
-                relevance_note: s.relevanceNote || null,
-              })
-            )
+            researchData.sources.map((s) => ({
+              course_id: course.id,
+              url: s.url || null,
+              title: s.title || null,
+              domain: s.domain || null,
+              relevance_note: s.relevanceNote || null,
+            }))
           );
         }
 
         // Save modules, lessons, quizzes
         for (let mi = 0; mi < (curriculum.modules || []).length; mi++) {
-          const mod = curriculum.modules[mi];
+          const mod = curriculum.modules![mi];
           const { data: moduleData } = await supabase
             .from("modules")
             .insert({
@@ -270,14 +332,10 @@ export async function POST(req: Request) {
           if (!moduleData) continue;
 
           for (let li = 0; li < (mod.lessons || []).length; li++) {
-            const lesson = mod.lessons[li];
+            const lesson = mod.lessons![li];
             const scheduledDate =
               schedule?.schedule?.find(
-                (s: {
-                  type: string;
-                  moduleIndex: number;
-                  lessonIndex: number;
-                }) =>
+                (s) =>
                   s.type === "lesson" &&
                   s.moduleIndex === mi &&
                   s.lessonIndex === li
@@ -298,11 +356,7 @@ export async function POST(req: Request) {
           if (mod.quiz) {
             const quizDate =
               schedule?.schedule?.find(
-                (s: {
-                  type: string;
-                  quizType?: string;
-                  moduleIndex: number;
-                }) =>
+                (s) =>
                   s.type === "quiz" &&
                   s.quizType === "module_exam" &&
                   s.moduleIndex === mi
@@ -321,8 +375,7 @@ export async function POST(req: Request) {
         if (curriculum.finalExam) {
           const finalDate =
             schedule?.schedule?.find(
-              (s: { type: string; quizType?: string }) =>
-                s.type === "quiz" && s.quizType === "final_exam"
+              (s) => s.type === "quiz" && s.quizType === "final_exam"
             )?.date || null;
 
           await supabase.from("quizzes").insert({
@@ -333,12 +386,19 @@ export async function POST(req: Request) {
           });
         }
 
+        send("step", {
+          step: 4,
+          total: 4,
+          label: "Course saved",
+          detail: "Everything is ready!",
+        });
+
         send("complete", { courseId: course.id });
         controller.close();
       } catch (error) {
         console.error("Research/curriculum generation error:", error);
         send("error", {
-          message: "Something went wrong generating your curriculum",
+          message: `Something went wrong: ${error instanceof Error ? error.message : "Unknown error"}. Check the server console for details.`,
         });
         controller.close();
       }

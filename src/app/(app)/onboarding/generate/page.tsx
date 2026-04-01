@@ -91,11 +91,28 @@ export default function GeneratePage() {
   }, [currentStep]);
 
   async function startGeneration(body: Record<string, unknown>) {
-    const res = await fetch("/api/agent/research", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    // 3-minute timeout so we don't hang forever
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 180_000);
+
+    let res: Response;
+    try {
+      res = await fetch("/api/agent/research", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(timeout);
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setError("Generation timed out after 3 minutes. Please try again.");
+      } else {
+        setError("Failed to connect to generation service.");
+      }
+      return;
+    }
+    clearTimeout(timeout);
 
     const reader = res.body?.getReader();
     const decoder = new TextDecoder();
