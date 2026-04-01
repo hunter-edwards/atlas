@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { slideGeneratorSystemPrompt } from "@/lib/prompts/slide-generator";
+import { getSlideGeneratorSystemPrompt } from "@/lib/prompts/slide-generator";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -40,7 +40,7 @@ export async function POST(req: Request) {
     const response = await client.messages.create({
       model: "claude-sonnet-4-20250514",
       max_tokens: 8000,
-      system: slideGeneratorSystemPrompt,
+      system: getSlideGeneratorSystemPrompt(),
       messages: [
         {
           role: "user",

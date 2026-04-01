@@ -1,11 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { researchSystemPrompt } from "@/lib/prompts/research";
-import { curriculumBuilderSystemPrompt } from "@/lib/prompts/curriculum-builder";
-import { schedulerSystemPrompt } from "@/lib/prompts/scheduler";
+import { getResearchSystemPrompt } from "@/lib/prompts/research";
+import { getCurriculumBuilderSystemPrompt } from "@/lib/prompts/curriculum-builder";
+import { getSchedulerSystemPrompt } from "@/lib/prompts/scheduler";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { readFileSync } from "fs";
-import { join } from "path";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -62,13 +60,15 @@ export async function POST(req: Request) {
             domain?: string;
             relevanceNote?: string;
           }[];
+          concept_map?: unknown;
+          topicStructure?: unknown;
         };
 
         try {
           const researchResponse = await client.messages.create({
             model: "claude-sonnet-4-20250514",
             max_tokens: 4000,
-            system: researchSystemPrompt,
+            system: getResearchSystemPrompt(),
             tools: [
               {
                 type: "web_search_20250305",
@@ -110,7 +110,7 @@ export async function POST(req: Request) {
           const fallbackResponse = await client.messages.create({
             model: "claude-sonnet-4-20250514",
             max_tokens: 4000,
-            system: researchSystemPrompt,
+            system: getResearchSystemPrompt(),
             messages: [
               {
                 role: "user",
@@ -154,24 +154,14 @@ export async function POST(req: Request) {
             "Building modules, lessons, and quizzes based on research...",
         });
 
-        let skillContent = "";
-        try {
-          skillContent = readFileSync(
-            join(process.cwd(), "src/lib/skills/curriculum-skill.md"),
-            "utf-8"
-          );
-        } catch {
-          // skill file not found
-        }
-
         const curriculumResponse = await client.messages.create({
           model: "claude-sonnet-4-20250514",
-          max_tokens: 4000,
-          system: curriculumBuilderSystemPrompt,
+          max_tokens: 8000,
+          system: getCurriculumBuilderSystemPrompt(),
           messages: [
             {
               role: "user",
-              content: `## Curriculum Skill Reference\n${skillContent}\n\n## Research\n${researchData.researchSummary}\n\n## Assessment\n${JSON.stringify(assessmentSummary)}\n\n## Configuration\nDifficulty: ${difficulty}\nHours/week: ${weeklyHours}\nSessions/week: ${sessionsPerWeek}\nTopic: ${topic}${motivation ? `\nMotivation: ${motivation}` : ""}\n\nGenerate the curriculum JSON.`,
+              content: `## Research Summary\n${researchData.researchSummary}\n\n## Concept Map\n${JSON.stringify(researchData.concept_map || researchData.topicStructure || [])}\n\n## Assessment Summary\n${JSON.stringify(assessmentSummary)}\n\n## Configuration\nDifficulty: ${difficulty}\nHours/week: ${weeklyHours}\nSessions/week: ${sessionsPerWeek}\nTopic: ${topic}${motivation ? `\nMotivation: ${motivation}` : ""}\n\nGenerate the curriculum JSON following the output format in your skill file.`,
             },
           ],
         });
@@ -232,7 +222,7 @@ export async function POST(req: Request) {
         const scheduleResponse = await client.messages.create({
           model: "claude-sonnet-4-20250514",
           max_tokens: 4000,
-          system: schedulerSystemPrompt,
+          system: getSchedulerSystemPrompt(),
           messages: [
             {
               role: "user",

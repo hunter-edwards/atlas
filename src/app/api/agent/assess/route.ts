@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { assessorSystemPrompt } from "@/lib/prompts/assessor";
+import { getAssessorSystemPrompt } from "@/lib/prompts/assessor";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -12,7 +12,7 @@ export async function POST(req: Request) {
   const response = await client.messages.create({
     model: "claude-sonnet-4-20250514",
     max_tokens: 2048,
-    system: assessorSystemPrompt,
+    system: getAssessorSystemPrompt(),
     messages: [
       {
         role: "user",
