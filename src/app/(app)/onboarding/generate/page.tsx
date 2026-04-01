@@ -12,8 +12,7 @@ interface StepInfo {
 
 const STEP_LABELS = [
   "Researching your topic",
-  "Designing your curriculum",
-  "Scheduling your course",
+  "Designing curriculum & schedule",
   "Saving your course",
 ];
 
@@ -82,7 +81,9 @@ export default function GeneratePage() {
     if (
       currentStep.label.toLowerCase().includes("complete") ||
       currentStep.label.toLowerCase().includes("created") ||
-      currentStep.label.toLowerCase().includes("designed")
+      currentStep.label.toLowerCase().includes("designed") ||
+      currentStep.label.toLowerCase().includes("ready") ||
+      currentStep.label.toLowerCase().includes("saved")
     ) {
       setSmoothProgress(targetProgress);
     }
@@ -241,7 +242,7 @@ export default function GeneratePage() {
                           stepNum
                         )}
                       </div>
-                      {stepNum < 4 && (
+                      {stepNum < STEP_LABELS.length && (
                         <div
                           className={`w-0.5 h-6 mt-1 transition-colors duration-500 ${
                             isDone ? "bg-accent" : "bg-border"

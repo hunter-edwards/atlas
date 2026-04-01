@@ -1,7 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { getResearchSystemPrompt } from "@/lib/prompts/research";
 import { getCurriculumBuilderSystemPrompt } from "@/lib/prompts/curriculum-builder";
-import { getSchedulerSystemPrompt } from "@/lib/prompts/scheduler";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -44,12 +43,12 @@ export async function POST(req: Request) {
       }
 
       try {
-        // === STEP 1: Research ===
+        // === STEP 1: Research (focused, fewer web searches) ===
         send("step", {
           step: 1,
-          total: 4,
+          total: 3,
           label: "Researching your topic",
-          detail: `Searching for authoritative sources on "${topic}"...`,
+          detail: `Searching for key sources on "${topic}"...`,
         });
 
         let researchData: {
@@ -67,18 +66,25 @@ export async function POST(req: Request) {
         try {
           const researchResponse = await client.messages.create({
             model: "claude-sonnet-4-20250514",
-            max_tokens: 4000,
+            max_tokens: 3000,
             system: getResearchSystemPrompt(),
             tools: [
               {
                 type: "web_search_20250305",
                 name: "web_search",
+                max_uses: 5,
               },
             ],
             messages: [
               {
                 role: "user",
-                content: `Research this topic for curriculum design: "${topic}"${motivation ? `\nLearner motivation: ${motivation}` : ""}\nTarget difficulty: ${difficulty}\nAssessment summary: ${JSON.stringify(assessmentSummary)}`,
+                content: `Research this topic for curriculum design. Be efficient — focus on the 5-8 most authoritative sources rather than exhaustive searching.
+
+Topic: "${topic}"${motivation ? `\nLearner motivation: ${motivation}` : ""}
+Target difficulty: ${difficulty}
+Assessment summary: ${JSON.stringify(assessmentSummary)}
+
+Return a concise research summary with sources and concept map. Prioritize breadth of coverage over depth of any single source.`,
               },
             ],
           });
@@ -102,19 +108,19 @@ export async function POST(req: Request) {
           console.error("Web search failed, falling back:", err);
           send("step", {
             step: 1,
-            total: 4,
+            total: 3,
             label: "Researching your topic",
             detail: "Web search unavailable, using AI knowledge...",
           });
 
           const fallbackResponse = await client.messages.create({
             model: "claude-sonnet-4-20250514",
-            max_tokens: 4000,
+            max_tokens: 3000,
             system: getResearchSystemPrompt(),
             messages: [
               {
                 role: "user",
-                content: `Research this topic for curriculum design using your knowledge (web search is not available): "${topic}"${motivation ? `\nLearner motivation: ${motivation}` : ""}\nTarget difficulty: ${difficulty}\nAssessment summary: ${JSON.stringify(assessmentSummary)}`,
+                content: `Research this topic for curriculum design using your knowledge (web search is not available): "${topic}"${motivation ? `\nLearner motivation: ${motivation}` : ""}\nTarget difficulty: ${difficulty}\nAssessment summary: ${JSON.stringify(assessmentSummary)}\n\nReturn a concise research summary with concept map.`,
               },
             ],
           });
@@ -138,20 +144,21 @@ export async function POST(req: Request) {
         const sourceCount = researchData.sources?.length || 0;
         send("step", {
           step: 1,
-          total: 4,
+          total: 3,
           label: "Research complete",
-          detail: sourceCount > 0
-            ? `Found ${sourceCount} source${sourceCount !== 1 ? "s" : ""}`
-            : "Research summary generated",
+          detail:
+            sourceCount > 0
+              ? `Found ${sourceCount} source${sourceCount !== 1 ? "s" : ""}`
+              : "Research summary generated",
         });
 
-        // === STEP 2: Build curriculum ===
+        // === STEP 2: Build curriculum WITH schedule (combined to save a full LLM round trip) ===
         send("step", {
           step: 2,
-          total: 4,
-          label: "Designing your curriculum",
+          total: 3,
+          label: "Designing your curriculum & schedule",
           detail:
-            "Building modules, lessons, and quizzes based on research...",
+            "Building modules, lessons, quizzes, and assigning dates...",
         });
 
         const curriculumResponse = await client.messages.create({
@@ -161,7 +168,44 @@ export async function POST(req: Request) {
           messages: [
             {
               role: "user",
-              content: `## Research Summary\n${researchData.researchSummary}\n\n## Concept Map\n${JSON.stringify(researchData.concept_map || researchData.topicStructure || [])}\n\n## Assessment Summary\n${JSON.stringify(assessmentSummary)}\n\n## Configuration\nDifficulty: ${difficulty}\nHours/week: ${weeklyHours}\nSessions/week: ${sessionsPerWeek}\nTopic: ${topic}${motivation ? `\nMotivation: ${motivation}` : ""}\n\nGenerate the curriculum JSON following the output format in your skill file.`,
+              content: `## Research Summary
+${researchData.researchSummary}
+
+## Concept Map
+${JSON.stringify(researchData.concept_map || researchData.topicStructure || [])}
+
+## Assessment Summary
+${JSON.stringify(assessmentSummary)}
+
+## Configuration
+Difficulty: ${difficulty}
+Hours/week: ${weeklyHours}
+Sessions/week: ${sessionsPerWeek}
+Start date: ${startDate}
+Topic: ${topic}${motivation ? `\nMotivation: ${motivation}` : ""}
+
+Generate the curriculum JSON following your skill file format. ALSO include a "schedule" field that assigns dates to each lesson and quiz.
+
+Use these scheduling rules:
+- Distribute ${sessionsPerWeek} sessions per week, each ≤90 minutes
+- Start from ${startDate}, skip weekends for scheduling
+- Place module quizzes after the last lesson in each module
+- Add 1 buffer day between modules
+- Apply spaced repetition: harder topics get more spread-out sessions
+
+Your JSON must include these top-level fields:
+{
+  "title": "string",
+  "collegeEquivalent": "string",
+  "estimatedTotalHours": number,
+  "modules": [...],
+  "finalExam": boolean,
+  "endDate": "YYYY-MM-DD",
+  "schedule": [
+    { "type": "lesson"|"quiz", "moduleIndex": number, "lessonIndex": number, "date": "YYYY-MM-DD" },
+    { "type": "quiz", "moduleIndex": number, "quizType": "module_exam"|"final_exam", "date": "YYYY-MM-DD" }
+  ]
+}`,
             },
           ],
         });
@@ -183,16 +227,44 @@ export async function POST(req: Request) {
             quiz?: { title?: string; quizType?: string };
           }[];
           finalExam?: boolean;
+          endDate?: string;
+          schedule?: {
+            type: string;
+            moduleIndex: number;
+            lessonIndex?: number;
+            quizType?: string;
+            date: string;
+          }[];
         } | null;
         try {
           const jsonMatch = curriculumText.match(/\{[\s\S]*\}/);
           curriculum = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
         } catch {
-          curriculum = null;
+          // Try to repair truncated JSON
+          try {
+            const arrStart = curriculumText.indexOf("{");
+            if (arrStart !== -1) {
+              let text = curriculumText.slice(arrStart);
+              const lastBrace = text.lastIndexOf("}");
+              if (lastBrace !== -1) {
+                text = text.slice(0, lastBrace + 1);
+                curriculum = JSON.parse(text);
+              } else {
+                curriculum = null;
+              }
+            } else {
+              curriculum = null;
+            }
+          } catch {
+            curriculum = null;
+          }
         }
 
         if (!curriculum) {
-          send("error", { message: "Failed to generate curriculum structure. Please try again." });
+          send("error", {
+            message:
+              "Failed to generate curriculum structure. Please try again.",
+          });
           controller.close();
           return;
         }
@@ -206,67 +278,15 @@ export async function POST(req: Request) {
 
         send("step", {
           step: 2,
-          total: 4,
-          label: "Curriculum designed",
-          detail: `${moduleCount} modules, ${lessonCount} lessons`,
+          total: 3,
+          label: "Curriculum & schedule ready",
+          detail: `${moduleCount} modules, ${lessonCount} lessons${curriculum.endDate ? ` — ends ${curriculum.endDate}` : ""}`,
         });
 
-        // === STEP 3: Schedule ===
+        // === STEP 3: Save to database ===
         send("step", {
           step: 3,
-          total: 4,
-          label: "Scheduling your course",
-          detail: `Planning ${sessionsPerWeek} sessions per week starting ${startDate}...`,
-        });
-
-        const scheduleResponse = await client.messages.create({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 4000,
-          system: getSchedulerSystemPrompt(),
-          messages: [
-            {
-              role: "user",
-              content: `Schedule this curriculum:\n${JSON.stringify(curriculum)}\n\nStart date: ${startDate}\nSessions per week: ${sessionsPerWeek}\nHours per week: ${weeklyHours}`,
-            },
-          ],
-        });
-
-        const scheduleText =
-          scheduleResponse.content
-            .filter((b): b is Anthropic.TextBlock => b.type === "text")
-            .map((b) => b.text)
-            .join("\n") || "";
-
-        let schedule: {
-          endDate?: string;
-          schedule?: {
-            type: string;
-            moduleIndex: number;
-            lessonIndex?: number;
-            quizType?: string;
-            date: string;
-          }[];
-        } | null;
-        try {
-          const jsonMatch = scheduleText.match(/\{[\s\S]*\}/);
-          schedule = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
-        } catch {
-          schedule = null;
-        }
-
-        send("step", {
-          step: 3,
-          total: 4,
-          label: "Schedule created",
-          detail: schedule?.endDate
-            ? `Course runs until ${schedule.endDate}`
-            : "Dates assigned to all sessions",
-        });
-
-        // === STEP 4: Save to database ===
-        send("step", {
-          step: 4,
-          total: 4,
+          total: 3,
           label: "Saving your course",
           detail: "Writing curriculum to database...",
         });
@@ -283,7 +303,7 @@ export async function POST(req: Request) {
             weekly_hours_available: weeklyHours,
             sessions_per_week: sessionsPerWeek,
             start_date: startDate,
-            end_date: schedule?.endDate || null,
+            end_date: curriculum.endDate || null,
             status: "active",
           })
           .select()
@@ -296,20 +316,23 @@ export async function POST(req: Request) {
           return;
         }
 
-        // Save sources
-        if (researchData.sources && researchData.sources.length > 0) {
-          await supabase.from("sources").insert(
-            researchData.sources.map((s) => ({
-              course_id: course.id,
-              url: s.url || null,
-              title: s.title || null,
-              domain: s.domain || null,
-              relevance_note: s.relevanceNote || null,
-            }))
-          );
-        }
+        // Save sources in parallel with module creation
+        const sourcePromise =
+          researchData.sources && researchData.sources.length > 0
+            ? supabase.from("sources").insert(
+                researchData.sources.map((s) => ({
+                  course_id: course.id,
+                  url: s.url || null,
+                  title: s.title || null,
+                  domain: s.domain || null,
+                  relevance_note: s.relevanceNote || null,
+                }))
+              )
+            : Promise.resolve();
 
-        // Save modules, lessons, quizzes
+        // Save modules, lessons, quizzes — batch inserts where possible
+        const schedule = curriculum.schedule || [];
+
         for (let mi = 0; mi < (curriculum.modules || []).length; mi++) {
           const mod = curriculum.modules![mi];
           const { data: moduleData } = await supabase
@@ -325,17 +348,17 @@ export async function POST(req: Request) {
 
           if (!moduleData) continue;
 
-          for (let li = 0; li < (mod.lessons || []).length; li++) {
-            const lesson = mod.lessons![li];
+          // Batch insert all lessons for this module
+          const lessonInserts = (mod.lessons || []).map((lesson, li) => {
             const scheduledDate =
-              schedule?.schedule?.find(
+              schedule.find(
                 (s) =>
                   s.type === "lesson" &&
                   s.moduleIndex === mi &&
                   s.lessonIndex === li
               )?.date || null;
 
-            await supabase.from("lessons").insert({
+            return {
               module_id: moduleData.id,
               course_id: course.id,
               title: lesson.title,
@@ -344,12 +367,16 @@ export async function POST(req: Request) {
               scheduled_date: scheduledDate,
               order_index: li,
               status: "pending",
-            });
+            };
+          });
+
+          if (lessonInserts.length > 0) {
+            await supabase.from("lessons").insert(lessonInserts);
           }
 
           if (mod.quiz) {
             const quizDate =
-              schedule?.schedule?.find(
+              schedule.find(
                 (s) =>
                   s.type === "quiz" &&
                   s.quizType === "module_exam" &&
@@ -368,7 +395,7 @@ export async function POST(req: Request) {
 
         if (curriculum.finalExam) {
           const finalDate =
-            schedule?.schedule?.find(
+            schedule.find(
               (s) => s.type === "quiz" && s.quizType === "final_exam"
             )?.date || null;
 
@@ -380,9 +407,12 @@ export async function POST(req: Request) {
           });
         }
 
+        // Wait for sources to finish
+        await sourcePromise;
+
         send("step", {
-          step: 4,
-          total: 4,
+          step: 3,
+          total: 3,
           label: "Course saved",
           detail: "Everything is ready!",
         });
