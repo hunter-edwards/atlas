@@ -42,7 +42,6 @@ export default function ConfigurePage() {
   const [weeklyHours, setWeeklyHours] = useState(5);
   const [sessionsPerWeek, setSessionsPerWeek] = useState(3);
   const [startDate, setStartDate] = useState("");
-  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     // Default start date to today
@@ -50,37 +49,13 @@ export default function ConfigurePage() {
     setStartDate(today);
   }, []);
 
-  async function handleGenerate() {
-    setLoading(true);
-
-    const onboarding = JSON.parse(
-      sessionStorage.getItem("onboarding") || "{}"
+  function handleGenerate() {
+    // Save config to sessionStorage and navigate to generate page
+    sessionStorage.setItem(
+      "courseConfig",
+      JSON.stringify({ difficulty, weeklyHours, sessionsPerWeek, startDate })
     );
-    const assessmentSummary = JSON.parse(
-      sessionStorage.getItem("assessmentSummary") || "{}"
-    );
-
-    // Create the course and kick off generation
-    const res = await fetch("/api/agent/research", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        topic: onboarding.topic,
-        motivation: onboarding.motivation,
-        assessmentSummary,
-        difficulty,
-        weeklyHours,
-        sessionsPerWeek,
-        startDate,
-      }),
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      router.push(`/course/${data.courseId}/overview`);
-    }
-
-    setLoading(false);
+    router.push("/onboarding/generate");
   }
 
   return (
@@ -187,10 +162,9 @@ export default function ConfigurePage() {
 
         <button
           onClick={handleGenerate}
-          disabled={loading}
-          className="rounded-md bg-primary text-primary-foreground px-6 py-2 text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+          className="rounded-md bg-primary text-primary-foreground px-6 py-2 text-sm font-medium hover:opacity-90 transition-opacity"
         >
-          {loading ? "Generating Curriculum..." : "Generate My Curriculum"}
+          Generate My Curriculum
         </button>
       </div>
     </div>

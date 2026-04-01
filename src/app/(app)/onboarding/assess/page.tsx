@@ -1,16 +1,29 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import type { ChatMessage, AssessmentSummary } from "@/lib/types";
+import type { AssessmentSummary } from "@/lib/types";
+
+interface QuizOption {
+  label: string;
+  text: string;
+}
+
+interface QuizQuestion {
+  id: number;
+  question: string;
+  options: QuizOption[];
+  correctAnswer: string;
+  knowledgeArea: string;
+}
 
 export default function AssessPage() {
   const router = useRouter();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [summary, setSummary] = useState<AssessmentSummary | null>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const [questions, setQuestions] = useState<QuizQuestion[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [answers, setAnswers] = useState<Record<number, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const stored = sessionStorage.getItem("onboarding");
@@ -18,163 +31,219 @@ export default function AssessPage() {
       router.push("/onboarding/describe");
       return;
     }
-    fetchNextQuestion([]);
+
+    async function loadQuestions() {
+      const { topic, motivation } = JSON.parse(
+        sessionStorage.getItem("onboarding") || "{}"
+      );
+
+      try {
+        const res = await fetch("/api/agent/assess", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ topic, motivation }),
+        });
+
+        if (!res.ok) throw new Error("Failed to load questions");
+
+        const data = await res.json();
+        setQuestions(data.questions || []);
+      } catch {
+        setError("Failed to generate assessment. Please try again.");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadQuestions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  function handleSelect(label: string) {
+    setAnswers((prev) => ({ ...prev, [questions[currentIndex].id]: label }));
+  }
 
-  async function fetchNextQuestion(history: ChatMessage[]) {
-    setLoading(true);
-    const stored = JSON.parse(sessionStorage.getItem("onboarding") || "{}");
+  function handleNext() {
+    if (currentIndex < questions.length - 1) {
+      setCurrentIndex((i) => i + 1);
+    }
+  }
 
-    const res = await fetch("/api/agent/assess", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        topic: stored.topic,
-        motivation: stored.motivation,
-        conversationHistory: history,
-      }),
-    });
+  function handleBack() {
+    if (currentIndex > 0) {
+      setCurrentIndex((i) => i - 1);
+    }
+  }
 
-    const reader = res.body?.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let accumulatedText = "";
+  function handleFinish() {
+    // Score the quiz and build the assessment summary
+    let correctCount = 0;
+    const knownAreas: string[] = [];
+    const gapAreas: string[] = [];
 
-    if (!reader) return;
-
-    // Add placeholder assistant message
-    setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          const data = line.slice(6);
-          if (data === "[DONE]") continue;
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.type === "summary") {
-              setSummary(parsed.data);
-              sessionStorage.setItem(
-                "assessmentSummary",
-                JSON.stringify(parsed.data)
-              );
-            } else if (parsed.type === "text") {
-              accumulatedText += parsed.data;
-              const snapshot = accumulatedText;
-              setMessages((prev) => [
-                ...prev.slice(0, -1),
-                { role: "assistant", content: snapshot },
-              ]);
-            }
-          } catch {
-            // skip malformed lines
-          }
-        }
+    for (const q of questions) {
+      const userAnswer = answers[q.id];
+      if (userAnswer === q.correctAnswer) {
+        correctCount++;
+        knownAreas.push(q.knowledgeArea);
+      } else {
+        gapAreas.push(q.knowledgeArea);
       }
     }
-    setLoading(false);
-  }
 
-  function handleSend() {
-    if (!input.trim() || loading) return;
-    const userMsg: ChatMessage = { role: "user", content: input };
-    const newHistory = [...messages, userMsg];
-    setMessages(newHistory);
-    setInput("");
-    fetchNextQuestion(newHistory);
-  }
+    const ratio = correctCount / questions.length;
+    let level: AssessmentSummary["knowledge_level"];
+    if (ratio >= 0.8) level = "advanced";
+    else if (ratio >= 0.6) level = "intermediate";
+    else if (ratio >= 0.3) level = "novice";
+    else level = "beginner";
 
-  function handleContinue() {
+    const summary: AssessmentSummary = {
+      knowledge_level: level,
+      known_concepts: knownAreas,
+      gaps_identified: gapAreas,
+      recommended_starting_point:
+        level === "beginner"
+          ? "Start from the very beginning with foundational concepts"
+          : level === "novice"
+            ? "Start with a brief review of basics, then move to core concepts"
+            : level === "intermediate"
+              ? "Skip introductory material and start with intermediate topics"
+              : "Focus on advanced topics and edge cases",
+    };
+
+    sessionStorage.setItem("assessmentSummary", JSON.stringify(summary));
     router.push("/onboarding/configure");
   }
 
+  if (loading) {
+    return (
+      <div className="max-w-2xl mx-auto px-6 py-16">
+        <p className="text-sm font-medium text-muted-foreground mb-2">
+          Step 2 of 3
+        </p>
+        <h1 className="text-3xl font-bold mb-6">Knowledge Assessment</h1>
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <div className="h-5 w-5 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin" />
+          Generating your assessment...
+        </div>
+      </div>
+    );
+  }
+
+  if (error || questions.length === 0) {
+    return (
+      <div className="max-w-2xl mx-auto px-6 py-16">
+        <p className="text-sm font-medium text-muted-foreground mb-2">
+          Step 2 of 3
+        </p>
+        <h1 className="text-3xl font-bold mb-6">Knowledge Assessment</h1>
+        <p className="text-muted-foreground">
+          {error || "No questions generated. Please go back and try again."}
+        </p>
+      </div>
+    );
+  }
+
+  const question = questions[currentIndex];
+  const selected = answers[question.id];
+  const allAnswered = questions.every((q) => answers[q.id] !== undefined);
+  const isLast = currentIndex === questions.length - 1;
+
   return (
-    <div className="max-w-2xl mx-auto px-6 py-16 flex flex-col h-[calc(100vh-3.5rem)]">
-      <div className="mb-6">
+    <div className="max-w-2xl mx-auto px-6 py-16">
+      <div className="mb-8">
         <p className="text-sm font-medium text-muted-foreground mb-2">
           Step 2 of 3
         </p>
         <h1 className="text-3xl font-bold mb-2">Knowledge Assessment</h1>
         <p className="text-muted-foreground">
-          Answer a few questions so we can tailor your curriculum.
+          Answer these questions so we can tailor your curriculum. Don&apos;t worry
+          about getting them right — we just need to understand where you&apos;re
+          starting from.
         </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto space-y-4 mb-4">
-        {messages.map((msg, i) => (
-          <div
+      {/* Progress dots */}
+      <div className="flex gap-2 mb-8">
+        {questions.map((_, i) => (
+          <button
             key={i}
-            className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-          >
-            <div
-              className={`max-w-[80%] rounded-lg px-4 py-2 text-sm ${
-                msg.role === "user"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-foreground"
-              }`}
-            >
-              {msg.content}
-            </div>
-          </div>
+            onClick={() => setCurrentIndex(i)}
+            className={`h-2 rounded-full transition-all ${
+              i === currentIndex
+                ? "w-8 bg-accent"
+                : answers[questions[i].id] !== undefined
+                  ? "w-2 bg-accent/50"
+                  : "w-2 bg-border"
+            }`}
+          />
         ))}
-        {loading && messages[messages.length - 1]?.role !== "assistant" && (
-          <div className="flex justify-start">
-            <div className="bg-muted rounded-lg px-4 py-2 text-sm text-muted-foreground">
-              Thinking...
-            </div>
-          </div>
-        )}
-        <div ref={bottomRef} />
       </div>
 
-      {summary ? (
-        <div className="border-t border-border pt-4">
-          <div className="rounded-md border border-border bg-muted p-4 mb-4">
-            <p className="text-sm font-medium mb-1">Assessment Complete</p>
-            <p className="text-sm text-muted-foreground">
-              Level: <strong>{summary.knowledge_level}</strong> — Starting
-              point: {summary.recommended_starting_point}
-            </p>
-          </div>
-          <button
-            onClick={handleContinue}
-            className="rounded-md bg-primary text-primary-foreground px-6 py-2 text-sm font-medium hover:opacity-90 transition-opacity"
-          >
-            Continue to Configuration
-          </button>
+      {/* Question */}
+      <div className="mb-8">
+        <p className="text-sm text-muted-foreground mb-2">
+          Question {currentIndex + 1} of {questions.length}
+        </p>
+        <h2 className="text-lg font-medium mb-6">{question.question}</h2>
+
+        <div className="space-y-3">
+          {question.options.map((opt) => (
+            <button
+              key={opt.label}
+              onClick={() => handleSelect(opt.label)}
+              className={`w-full flex items-center gap-3 rounded-md border p-4 text-left transition-colors ${
+                selected === opt.label
+                  ? "border-accent bg-accent/5"
+                  : "border-border hover:border-muted-foreground/30"
+              }`}
+            >
+              <span
+                className={`flex items-center justify-center w-7 h-7 rounded-full border text-sm font-medium shrink-0 ${
+                  selected === opt.label
+                    ? "border-accent bg-accent text-accent-foreground"
+                    : "border-border"
+                }`}
+              >
+                {opt.label}
+              </span>
+              <span className="text-sm">{opt.text}</span>
+            </button>
+          ))}
         </div>
-      ) : (
-        <div className="border-t border-border pt-4 flex gap-2">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSend()}
-            placeholder="Type your answer..."
-            className="flex-1 rounded-md border border-border bg-card px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-accent"
-            disabled={loading}
-          />
-          <button
-            onClick={handleSend}
-            disabled={loading || !input.trim()}
-            className="rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
-          >
-            Send
-          </button>
+      </div>
+
+      {/* Navigation */}
+      <div className="flex items-center justify-between">
+        <button
+          onClick={handleBack}
+          disabled={currentIndex === 0}
+          className="text-sm font-medium text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+        >
+          Back
+        </button>
+
+        <div className="flex gap-3">
+          {!isLast ? (
+            <button
+              onClick={handleNext}
+              disabled={!selected}
+              className="rounded-md bg-primary text-primary-foreground px-6 py-2 text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              Next
+            </button>
+          ) : (
+            <button
+              onClick={handleFinish}
+              disabled={!allAnswered}
+              className="rounded-md bg-primary text-primary-foreground px-6 py-2 text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              Continue to Configuration
+            </button>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
