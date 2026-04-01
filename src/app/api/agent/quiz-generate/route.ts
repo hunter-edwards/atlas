@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -7,7 +7,7 @@ export const maxDuration = 120;
 export async function POST(req: Request) {
   const { quizId, courseId } = await req.json();
 
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const [quizRes, courseRes] = await Promise.all([
     supabase.from("quizzes").select("*").eq("id", quizId).single(),

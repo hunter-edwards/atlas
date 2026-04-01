@@ -1,11 +1,11 @@
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
   const { quizId, responses } = await req.json();
 
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   // Fetch all questions for the quiz
   const { data: questions } = await supabase

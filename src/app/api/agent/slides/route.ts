@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { slideGeneratorSystemPrompt } from "@/lib/prompts/slide-generator";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -8,7 +8,7 @@ export const maxDuration = 120;
 export async function POST(req: Request) {
   const { lessonId, courseId } = await req.json();
 
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   // Fetch lesson and context
   const [lessonRes, courseRes, moduleRes] = await Promise.all([

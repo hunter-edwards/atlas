@@ -3,6 +3,7 @@ import { researchSystemPrompt } from "@/lib/prompts/research";
 import { curriculumBuilderSystemPrompt } from "@/lib/prompts/curriculum-builder";
 import { schedulerSystemPrompt } from "@/lib/prompts/scheduler";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { readFileSync } from "fs";
 import { join } from "path";
 
@@ -21,11 +22,14 @@ export async function POST(req: Request) {
   } = await req.json();
 
   const client = new Anthropic();
-  const supabase = await createClient();
+
+  // Use regular client for auth check, admin client for DB writes (bypasses RLS)
+  const authClient = await createClient();
+  const supabase = createAdminClient();
 
   const {
     data: { user },
-  } = await supabase.auth.getUser();
+  } = await authClient.auth.getUser();
 
   if (!user) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
