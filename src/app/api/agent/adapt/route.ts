@@ -82,7 +82,13 @@ export async function POST(req: Request) {
   const aiResponse = await client.messages.create({
     model: "claude-sonnet-4-20250514",
     max_tokens: 4000,
-    system: getAdaptiveLearningSystemPrompt(),
+    system: [
+      {
+        type: "text",
+        text: getAdaptiveLearningSystemPrompt(),
+        cache_control: { type: "ephemeral" },
+      },
+    ],
     messages: [
       {
         role: "user",

@@ -70,7 +70,13 @@ export async function POST(req: Request) {
   const aiResponse = await client.messages.create({
     model: "claude-sonnet-4-20250514",
     max_tokens: 6000,
-    system: getFeedbackGenerationSystemPrompt(),
+    system: [
+      {
+        type: "text",
+        text: getFeedbackGenerationSystemPrompt(),
+        cache_control: { type: "ephemeral" },
+      },
+    ],
     messages: [
       {
         role: "user",

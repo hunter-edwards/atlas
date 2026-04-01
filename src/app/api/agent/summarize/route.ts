@@ -174,7 +174,13 @@ ${
   const aiResponse = await client.messages.create({
     model: "claude-sonnet-4-20250514",
     max_tokens: 8000,
-    system: getContentSummarizationSystemPrompt(),
+    system: [
+      {
+        type: "text",
+        text: getContentSummarizationSystemPrompt(),
+        cache_control: { type: "ephemeral" },
+      },
+    ],
     messages: [
       {
         role: "user",

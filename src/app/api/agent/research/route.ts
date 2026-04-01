@@ -67,7 +67,13 @@ export async function POST(req: Request) {
           const researchResponse = await client.messages.create({
             model: "claude-sonnet-4-20250514",
             max_tokens: 3000,
-            system: getResearchSystemPrompt(),
+            system: [
+              {
+                type: "text",
+                text: getResearchSystemPrompt(),
+                cache_control: { type: "ephemeral" },
+              },
+            ],
             tools: [
               {
                 type: "web_search_20250305",
@@ -116,7 +122,13 @@ Return a concise research summary with sources and concept map. Prioritize bread
           const fallbackResponse = await client.messages.create({
             model: "claude-sonnet-4-20250514",
             max_tokens: 3000,
-            system: getResearchSystemPrompt(),
+            system: [
+              {
+                type: "text",
+                text: getResearchSystemPrompt(),
+                cache_control: { type: "ephemeral" },
+              },
+            ],
             messages: [
               {
                 role: "user",
@@ -164,7 +176,13 @@ Return a concise research summary with sources and concept map. Prioritize bread
         const curriculumResponse = await client.messages.create({
           model: "claude-sonnet-4-20250514",
           max_tokens: 8000,
-          system: getCurriculumBuilderSystemPrompt(),
+          system: [
+            {
+              type: "text",
+              text: getCurriculumBuilderSystemPrompt(),
+              cache_control: { type: "ephemeral" },
+            },
+          ],
           messages: [
             {
               role: "user",

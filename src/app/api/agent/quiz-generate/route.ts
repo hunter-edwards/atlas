@@ -55,7 +55,13 @@ export async function POST(req: Request) {
   const response = await client.messages.create({
     model: "claude-sonnet-4-20250514",
     max_tokens: 8000,
-    system: getQuizGeneratorSystemPrompt(),
+    system: [
+      {
+        type: "text",
+        text: getQuizGeneratorSystemPrompt(),
+        cache_control: { type: "ephemeral" },
+      },
+    ],
     messages: [
       {
         role: "user",
