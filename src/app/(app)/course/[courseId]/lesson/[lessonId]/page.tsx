@@ -16,6 +16,7 @@ export default function LessonPage() {
   const [slides, setSlides] = useState<Slide[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [generating, setGenerating] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
 
   useEffect(() => {
     const supabase = createClient();
@@ -48,15 +49,22 @@ export default function LessonPage() {
 
   async function generateSlides() {
     setGenerating(true);
-    const res = await fetch("/api/agent/slides", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ lessonId, courseId }),
-    });
+    setGenError(null);
+    try {
+      const res = await fetch("/api/agent/slides", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lessonId, courseId }),
+      });
 
-    if (res.ok) {
       const data = await res.json();
-      setSlides(data.slides || []);
+      if (res.ok && data.slides && data.slides.length > 0) {
+        setSlides(data.slides);
+      } else {
+        setGenError(data.error || "Failed to generate slides. Please try again.");
+      }
+    } catch {
+      setGenError("Network error. Please try again.");
     }
     setGenerating(false);
   }
@@ -106,8 +114,18 @@ export default function LessonPage() {
 
   if (slides.length === 0) {
     return (
-      <div className="flex items-center justify-center h-[calc(100vh-3.5rem)] text-muted-foreground">
-        No slides available.
+      <div className="flex items-center justify-center h-[calc(100vh-3.5rem)]">
+        <div className="text-center max-w-sm">
+          <p className="text-muted-foreground mb-4">
+            {genError || "No slides available for this lesson."}
+          </p>
+          <button
+            onClick={generateSlides}
+            className="rounded-md bg-primary text-primary-foreground px-6 py-2 text-sm font-medium hover:opacity-90 transition-opacity"
+          >
+            Try Generating Again
+          </button>
+        </div>
       </div>
     );
   }

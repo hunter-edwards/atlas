@@ -10,28 +10,29 @@ export async function POST(req: Request) {
 
   const supabase = createAdminClient();
 
-  // Fetch lesson and context
-  const [lessonRes, courseRes, moduleRes] = await Promise.all([
-    supabase.from("lessons").select("*").eq("id", lessonId).single(),
-    supabase.from("courses").select("*").eq("id", courseId).single(),
-    supabase
-      .from("lessons")
-      .select("*, modules(*)")
-      .eq("id", lessonId)
-      .single(),
-  ]);
+  // Fetch lesson, course, and module separately (avoids join issues)
+  const { data: lesson, error: lessonErr } = await supabase
+    .from("lessons")
+    .select("*")
+    .eq("id", lessonId)
+    .single();
 
-  const lesson = lessonRes.data;
-  const course = courseRes.data;
-
-  if (!lesson || !course) {
-    return Response.json({ error: "Not found" }, { status: 404 });
+  if (lessonErr || !lesson) {
+    console.error("Lesson fetch error:", lessonErr);
+    return Response.json({ error: "Lesson not found" }, { status: 404 });
   }
 
-  const moduleContext =
-    moduleRes.data && typeof moduleRes.data === "object" && "modules" in moduleRes.data
-      ? (moduleRes.data as Record<string, unknown>).modules
-      : null;
+  const { data: course } = await supabase
+    .from("courses")
+    .select("*")
+    .eq("id", courseId)
+    .single();
+
+  const { data: module } = await supabase
+    .from("modules")
+    .select("*")
+    .eq("id", lesson.module_id)
+    .single();
 
   const client = new Anthropic();
 
@@ -43,7 +44,15 @@ export async function POST(req: Request) {
       messages: [
         {
           role: "user",
-          content: `Generate slides for this lesson:\n\nCourse: ${course.title}\nDifficulty: ${course.difficulty_level || "200-level"}\nModule: ${moduleContext && typeof moduleContext === "object" && "title" in moduleContext ? (moduleContext as { title: string }).title : "Unknown"}\nLesson: ${lesson.title}\n\nGenerate 8-12 slides following the lesson arc (Hook → Concept → Example → Application → Summary).`,
+          content: `Generate slides for this lesson:
+
+Course: ${course?.title || "Unknown Course"}
+Difficulty: ${course?.difficulty_level || "200-level"}
+Module: ${module?.title || "Unknown Module"}
+Module description: ${module?.description || "N/A"}
+Lesson: ${lesson.title}
+
+Generate 8-12 slides following the lesson arc (Hook → Concept → Example → Application → Summary). Return ONLY a JSON array, no markdown fences.`,
         },
       ],
     });
@@ -56,39 +65,62 @@ export async function POST(req: Request) {
 
     let slides;
     try {
+      // Try to find a JSON array in the response
       const jsonMatch = responseText.match(/\[[\s\S]*\]/);
       slides = jsonMatch ? JSON.parse(jsonMatch[0]) : [];
-    } catch {
+    } catch (parseErr) {
+      console.error("Slide JSON parse error:", parseErr);
+      console.error("Raw response:", responseText.slice(0, 500));
       slides = [];
     }
 
+    if (slides.length === 0) {
+      console.error("No slides generated. Response:", responseText.slice(0, 500));
+      return Response.json(
+        { error: "Failed to generate slides", slides: [] },
+        { status: 500 }
+      );
+    }
+
     // Save slides to database
-    if (slides.length > 0) {
-      await supabase.from("slides").insert(
-        slides.map(
-          (s: {
+    const { error: insertErr } = await supabase.from("slides").insert(
+      slides.map(
+        (
+          s: {
             title?: string;
             body: string;
             speakerNotes?: string;
+            speaker_notes?: string;
             visualHint?: string;
-            orderIndex: number;
-          }) => ({
-            lesson_id: lessonId,
-            title: s.title || null,
-            body: s.body,
-            speaker_notes: s.speakerNotes || null,
-            visual_hint: s.visualHint || null,
-            order_index: s.orderIndex,
-          })
-        )
-      );
+            visual_hint?: string;
+            orderIndex?: number;
+            order_index?: number;
+          },
+          i: number
+        ) => ({
+          lesson_id: lessonId,
+          title: s.title || null,
+          body: s.body,
+          speaker_notes: s.speakerNotes || s.speaker_notes || null,
+          visual_hint: s.visualHint || s.visual_hint || null,
+          order_index: s.orderIndex ?? s.order_index ?? i,
+        })
+      )
+    );
 
-      // Mark lesson as in progress
-      await supabase
-        .from("lessons")
-        .update({ status: "in_progress" })
-        .eq("id", lessonId);
+    if (insertErr) {
+      console.error("Slide insert error:", insertErr);
+      return Response.json(
+        { error: "Failed to save slides" },
+        { status: 500 }
+      );
     }
+
+    // Mark lesson as in progress
+    await supabase
+      .from("lessons")
+      .update({ status: "in_progress" })
+      .eq("id", lessonId);
 
     // Fetch saved slides to return with proper IDs
     const { data: savedSlides } = await supabase
@@ -101,7 +133,7 @@ export async function POST(req: Request) {
   } catch (error) {
     console.error("Slide generation error:", error);
     return Response.json(
-      { error: "Failed to generate slides" },
+      { error: `Failed to generate slides: ${error instanceof Error ? error.message : "Unknown error"}` },
       { status: 500 }
     );
   }
