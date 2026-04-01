@@ -13,7 +13,6 @@ export default function AssessPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Kick off the first assessment question
     const stored = sessionStorage.getItem("onboarding");
     if (!stored) {
       router.push("/onboarding/describe");
@@ -44,12 +43,12 @@ export default function AssessPage() {
     const reader = res.body?.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    let accumulatedText = "";
 
     if (!reader) return;
 
-    // Append a placeholder assistant message
-    const assistantMsg: ChatMessage = { role: "assistant", content: "" };
-    setMessages((prev) => [...prev, assistantMsg]);
+    // Add placeholder assistant message
+    setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
     while (true) {
       const { done, value } = await reader.read();
@@ -72,17 +71,12 @@ export default function AssessPage() {
                 JSON.stringify(parsed.data)
               );
             } else if (parsed.type === "text") {
-              setMessages((prev) => {
-                const updated = [...prev];
-                const last = updated[updated.length - 1];
-                if (last.role === "assistant") {
-                  return [
-                    ...updated.slice(0, -1),
-                    { ...last, content: last.content + parsed.data },
-                  ];
-                }
-                return updated;
-              });
+              accumulatedText += parsed.data;
+              const snapshot = accumulatedText;
+              setMessages((prev) => [
+                ...prev.slice(0, -1),
+                { role: "assistant", content: snapshot },
+              ]);
             }
           } catch {
             // skip malformed lines
@@ -135,7 +129,7 @@ export default function AssessPage() {
             </div>
           </div>
         ))}
-        {loading && (
+        {loading && messages[messages.length - 1]?.role !== "assistant" && (
           <div className="flex justify-start">
             <div className="bg-muted rounded-lg px-4 py-2 text-sm text-muted-foreground">
               Thinking...
