@@ -6,17 +6,28 @@ import { createAdminClient } from "@/lib/supabase/admin";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-async function generateImage(prompt: string): Promise<string | null> {
+async function generateImage(
+  prompt: string,
+  courseContext: string
+): Promise<string | null> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
 
   try {
     const openai = new OpenAI({ apiKey });
     const result = await openai.images.generate({
-      model: "gpt-image-1-mini",
-      prompt: `Educational illustration for a learning slide: ${prompt}. Clean, professional style suitable for academic content. No text in the image.`,
-      size: "1024x1024",
-      quality: "low",
+      model: "gpt-image-1",
+      prompt: `${courseContext}
+
+Create an educational illustration: ${prompt}
+
+Requirements:
+- Clean, professional style suitable for academic/educational content
+- DO NOT include any text, labels, or words in the image
+- Photorealistic or clean vector style depending on subject matter
+- Well-lit, clear composition focused on the subject`,
+      size: "1536x1024",
+      quality: "medium",
     });
 
     const b64 = result.data?.[0]?.b64_json;
@@ -59,6 +70,10 @@ export async function POST(req: Request) {
     .eq("id", lesson.module_id)
     .single();
 
+  // Build course context string for image generation — prevents ambiguity
+  // (e.g. "flute" in corrugated packaging vs. musical instrument)
+  const courseContext = `Context: This image is for an educational course about "${course?.topic_description || course?.title || ""}". The course is titled "${course?.title || ""}". The current module is "${module?.title || ""}" and the lesson is "${lesson.title}". All terminology should be interpreted in the context of this specific subject matter.`;
+
   const client = new Anthropic();
 
   try {
@@ -78,20 +93,20 @@ export async function POST(req: Request) {
           content: `Generate slides for this lesson:
 
 Course: ${course?.title || "Unknown Course"}
+Topic: ${course?.topic_description || "N/A"}
 Difficulty: ${course?.difficulty_level || "200-level"}
 Module: ${module?.title || "Unknown Module"}
 Module description: ${module?.description || "N/A"}
 Lesson: ${lesson.title}
 
-Generate exactly 8 slides following the lesson arc (Hook → Concept → Example → Application → Summary).
+Generate exactly 8 slides following the lesson arc from the skill file.
 
 IMPORTANT:
 - Return ONLY a valid JSON array, no markdown fences, no extra text
-- Include visualType for every slide ("illustration", "diagram", or "none")
-- For "diagram" slides, include valid Mermaid.js diagramCode
-- For "illustration" slides, write a detailed visualHint prompt
-- Keep each slide body to 3-5 bullet points (not full paragraphs)
-- Keep speakerNotes to 2-3 sentences max
+- For "illustration" slides, the visualHint MUST include the specific subject context so the image generator knows the domain (e.g. "corrugated packaging flute profiles" not just "flute")
+- Only use "illustration" when a diagram genuinely cannot capture what needs to be shown (physical objects, real-world scenes, materials, equipment)
+- Use "diagram" for processes, relationships, hierarchies, timelines
+- Use "none" for hooks, overviews, summaries, misconception slides
 - This must be valid, complete JSON that can be parsed`,
         },
       ],
@@ -143,11 +158,16 @@ IMPORTANT:
     // Generate images for illustration slides in parallel
     const hasOpenAI = !!process.env.OPENAI_API_KEY;
     const imagePromises = slides.map(
-      async (s: { visualType?: string; visual_type?: string; visualHint?: string; visual_hint?: string }) => {
+      async (s: {
+        visualType?: string;
+        visual_type?: string;
+        visualHint?: string;
+        visual_hint?: string;
+      }) => {
         const vType = s.visualType || s.visual_type || "none";
         const vHint = s.visualHint || s.visual_hint || "";
         if (hasOpenAI && vType === "illustration" && vHint) {
-          return generateImage(vHint);
+          return generateImage(vHint, courseContext);
         }
         return null;
       }
@@ -172,6 +192,11 @@ IMPORTANT:
             diagram_code?: string;
             orderIndex?: number;
             order_index?: number;
+            layoutTemplate?: string;
+            layout_template?: string;
+            colorArchetype?: string;
+            color_archetype?: string;
+            callout?: { text?: string; type?: string } | null;
           },
           i: number
         ) => ({
@@ -184,6 +209,10 @@ IMPORTANT:
           image_url: imageResults[i] || null,
           diagram_code: s.diagramCode || s.diagram_code || null,
           order_index: s.orderIndex ?? s.order_index ?? i,
+          layout_template: s.layoutTemplate || s.layout_template || "B",
+          color_archetype: s.colorArchetype || s.color_archetype || "Scholar",
+          callout_text: s.callout?.text || null,
+          callout_type: s.callout?.type || null,
         })
       )
     );

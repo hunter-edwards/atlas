@@ -205,6 +205,10 @@ export interface Database {
           image_url: string | null;
           diagram_code: string | null;
           order_index: number | null;
+          layout_template: string | null;
+          color_archetype: string | null;
+          callout_text: string | null;
+          callout_type: string | null;
         };
         Insert: {
           id?: string;
@@ -217,6 +221,10 @@ export interface Database {
           image_url?: string | null;
           diagram_code?: string | null;
           order_index?: number | null;
+          layout_template?: string | null;
+          color_archetype?: string | null;
+          callout_text?: string | null;
+          callout_type?: string | null;
         };
         Update: {
           id?: string;
@@ -229,6 +237,10 @@ export interface Database {
           image_url?: string | null;
           diagram_code?: string | null;
           order_index?: number | null;
+          layout_template?: string | null;
+          color_archetype?: string | null;
+          callout_text?: string | null;
+          callout_type?: string | null;
         };
         Relationships: [
           {
