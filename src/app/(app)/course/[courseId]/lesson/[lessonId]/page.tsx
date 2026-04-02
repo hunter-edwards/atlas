@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -19,24 +19,62 @@ const SLIDE_THEMES = [
   { bg: "from-slate-800 to-slate-900", text: "text-white", accent: "text-blue-400", badge: "bg-slate-700" },
 ];
 
-// Slide layout types based on position in lesson arc
-function getSlideLayout(index: number, total: number): "hero" | "content" | "split" | "highlight" | "summary" {
-  if (index === 0) return "hero";
+// Slide layout: if slide has a visual (image or diagram), use split; otherwise positional
+function getSlideLayout(
+  index: number,
+  total: number,
+  hasVisual: boolean
+): "hero" | "content" | "split" | "highlight" | "summary" {
+  if (index === 0) return hasVisual ? "split" : "hero";
   if (index === total - 1) return "summary";
-  if (index === 1) return "content";
+  if (hasVisual) return "split";
   if (index % 3 === 0) return "highlight";
-  if (index % 2 === 0) return "split";
   return "content";
 }
 
-function extractKeywords(hint: string): string {
-  // Extract meaningful keywords from visual_hint for image search
-  return hint
-    .replace(/diagram|chart|image|visual|showing|illustration|depicting|of|the|a|an|with|and|for|in|on|to/gi, "")
-    .trim()
-    .split(/\s+/)
-    .slice(0, 3)
-    .join(",");
+// Mermaid diagram renderer component
+function MermaidDiagram({ code, isDark }: { code: string; isDark: boolean }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [svg, setSvg] = useState<string>("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function render() {
+      try {
+        const mermaid = (await import("mermaid")).default;
+        mermaid.initialize({
+          startOnLoad: false,
+          theme: isDark ? "dark" : "default",
+          fontFamily: "IBM Plex Sans, sans-serif",
+          flowchart: { curve: "basis", padding: 15 },
+        });
+        const id = `mermaid-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const { svg: rendered } = await mermaid.render(id, code);
+        if (!cancelled) setSvg(rendered);
+      } catch (err) {
+        console.error("Mermaid render failed:", err);
+        // Show the code as fallback
+        if (!cancelled)
+          setSvg(
+            `<pre style="font-size:12px;opacity:0.6;white-space:pre-wrap">${code}</pre>`
+          );
+      }
+    }
+
+    render();
+    return () => {
+      cancelled = true;
+    };
+  }, [code, isDark]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="flex items-center justify-center"
+      dangerouslySetInnerHTML={{ __html: svg }}
+    />
+  );
 }
 
 export default function LessonPage() {
@@ -142,7 +180,7 @@ export default function LessonPage() {
             Generating your lesson...
           </div>
           <p className="text-sm text-slate-400">
-            Crafting slides with engaging content
+            Crafting slides and generating visuals
           </p>
         </div>
       </div>
@@ -153,7 +191,6 @@ export default function LessonPage() {
     return (
       <div className="flex items-center justify-center h-[calc(100vh-3.5rem)] bg-gradient-to-br from-slate-50 to-white">
         <div className="text-center max-w-sm">
-          <div className="text-4xl mb-4">📑</div>
           <p className="text-muted-foreground mb-4">
             {genError || "No slides available for this lesson."}
           </p>
@@ -170,9 +207,17 @@ export default function LessonPage() {
 
   const slide = slides[currentIndex];
   const theme = SLIDE_THEMES[currentIndex % SLIDE_THEMES.length];
-  const layout = getSlideLayout(currentIndex, slides.length);
-  const isDark = theme.bg.includes("600") || theme.bg.includes("800") || theme.bg.includes("900");
+  const isDark =
+    theme.bg.includes("600") ||
+    theme.bg.includes("700") ||
+    theme.bg.includes("800") ||
+    theme.bg.includes("900");
   const progress = ((currentIndex + 1) / slides.length) * 100;
+
+  const hasImage = !!slide.image_url;
+  const hasDiagram = slide.visual_type === "diagram" && !!slide.diagram_code;
+  const hasVisual = hasImage || hasDiagram;
+  const layout = getSlideLayout(currentIndex, slides.length, hasVisual);
 
   return (
     <div className="flex flex-col h-[calc(100vh-3.5rem)]">
@@ -207,7 +252,14 @@ export default function LessonPage() {
           )}
           {lesson?.status === "completed" && (
             <span className="text-xs text-emerald-600 font-medium flex items-center gap-1">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="3"
+              >
                 <polyline points="20 6 9 17 4 12" />
               </svg>
               Complete
@@ -233,23 +285,33 @@ export default function LessonPage() {
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
           {layout === "hero" && (
             <>
-              <div className={`absolute -top-20 -right-20 w-80 h-80 rounded-full ${isDark ? "bg-white/5" : "bg-black/3"}`} />
-              <div className={`absolute -bottom-32 -left-32 w-96 h-96 rounded-full ${isDark ? "bg-white/3" : "bg-black/2"}`} />
+              <div
+                className={`absolute -top-20 -right-20 w-80 h-80 rounded-full ${isDark ? "bg-white/5" : "bg-black/3"}`}
+              />
+              <div
+                className={`absolute -bottom-32 -left-32 w-96 h-96 rounded-full ${isDark ? "bg-white/3" : "bg-black/2"}`}
+              />
             </>
           )}
           {layout === "highlight" && (
-            <div className={`absolute top-0 left-0 w-2 h-full ${isDark ? "bg-white/20" : "bg-current opacity-10"}`} />
+            <div
+              className={`absolute top-0 left-0 w-2 h-full ${isDark ? "bg-white/20" : "bg-current opacity-10"}`}
+            />
           )}
           {layout === "summary" && (
             <>
-              <div className={`absolute top-10 right-10 w-40 h-40 rounded-full border ${isDark ? "border-white/10" : "border-black/5"}`} />
-              <div className={`absolute bottom-10 left-10 w-24 h-24 rounded-full border ${isDark ? "border-white/10" : "border-black/5"}`} />
+              <div
+                className={`absolute top-10 right-10 w-40 h-40 rounded-full border ${isDark ? "border-white/10" : "border-black/5"}`}
+              />
+              <div
+                className={`absolute bottom-10 left-10 w-24 h-24 rounded-full border ${isDark ? "border-white/10" : "border-black/5"}`}
+              />
             </>
           )}
         </div>
 
         <div
-          className={`relative z-10 w-full max-w-4xl px-12 py-8 ${
+          className={`relative z-10 w-full max-w-5xl px-12 py-8 ${
             layout === "hero" ? "text-center" : ""
           }`}
         >
@@ -276,22 +338,19 @@ export default function LessonPage() {
           )}
 
           {/* Body with visual layout */}
-          <div className="flex gap-8 items-start">
+          <div
+            className={`flex gap-8 items-start ${layout === "split" ? "" : "flex-col"}`}
+          >
+            {/* Text content */}
             <div
-              className={`flex-1 ${
-                layout === "split" && slide.visual_hint ? "max-w-[55%]" : ""
-              }`}
+              className={`${layout === "split" && hasVisual ? "flex-1 min-w-0" : "w-full"}`}
             >
               <div
                 className={`prose max-w-none ${
                   isDark
                     ? "prose-invert prose-p:text-white/90 prose-li:text-white/90 prose-strong:text-white prose-headings:text-white"
                     : "prose-slate"
-                } ${
-                  layout === "hero"
-                    ? "prose-lg text-center"
-                    : "prose-base"
-                }`}
+                } ${layout === "hero" ? "prose-lg text-center" : "prose-base"}`}
               >
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                   {slide.body}
@@ -299,73 +358,54 @@ export default function LessonPage() {
               </div>
             </div>
 
-            {/* Visual element */}
-            {slide.visual_hint && layout === "split" && (
-              <div className="flex-shrink-0 w-[40%]">
-                <div
-                  className={`rounded-xl overflow-hidden ${
-                    isDark ? "bg-white/10" : "bg-black/5"
-                  } aspect-[4/3] flex items-center justify-center relative`}
-                >
+            {/* Visual: AI-generated image */}
+            {hasImage && (
+              <div
+                className={`flex-shrink-0 ${layout === "split" ? "w-[42%]" : "w-full max-w-lg mx-auto"}`}
+              >
+                <div className="rounded-xl overflow-hidden shadow-2xl">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={`https://source.unsplash.com/800x600/?${encodeURIComponent(extractKeywords(slide.visual_hint))}`}
-                    alt={slide.visual_hint}
-                    className="w-full h-full object-cover"
-                    onError={(e) => {
-                      // Fall back to visual hint text if image fails
-                      (e.target as HTMLImageElement).style.display = "none";
-                      const parent = (e.target as HTMLImageElement).parentElement;
-                      if (parent) {
-                        const fallback = document.createElement("p");
-                        fallback.className = `text-sm p-4 ${isDark ? "text-white/60" : "text-slate-500"}`;
-                        fallback.textContent = slide.visual_hint ?? "";
-                        parent.appendChild(fallback);
-                      }
-                    }}
+                    src={slide.image_url!}
+                    alt={slide.visual_hint || "Slide illustration"}
+                    className="w-full h-auto"
                   />
                 </div>
-                <p className={`text-xs mt-2 italic ${isDark ? "text-white/40" : "text-slate-400"}`}>
-                  {slide.visual_hint}
-                </p>
+                {slide.visual_hint && (
+                  <p
+                    className={`text-xs mt-2 italic ${isDark ? "text-white/40" : "text-slate-400"}`}
+                  >
+                    {slide.visual_hint}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Visual: Mermaid diagram */}
+            {hasDiagram && (
+              <div
+                className={`flex-shrink-0 ${layout === "split" ? "w-[42%]" : "w-full max-w-lg mx-auto"}`}
+              >
+                <div
+                  className={`rounded-xl p-4 ${isDark ? "bg-white/10 backdrop-blur" : "bg-white shadow-lg border border-slate-200"}`}
+                >
+                  <MermaidDiagram
+                    code={slide.diagram_code!}
+                    isDark={isDark}
+                  />
+                </div>
               </div>
             )}
           </div>
-
-          {/* Visual hint as image for non-split layouts */}
-          {slide.visual_hint && layout !== "split" && (
-            <div className="mt-8 flex justify-center">
-              <div
-                className={`rounded-xl overflow-hidden ${
-                  isDark ? "bg-white/10" : "bg-black/5"
-                } max-w-lg w-full aspect-video flex items-center justify-center relative`}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={`https://source.unsplash.com/800x450/?${encodeURIComponent(extractKeywords(slide.visual_hint))}`}
-                  alt={slide.visual_hint}
-                  className="w-full h-full object-cover"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).style.display = "none";
-                    const parent = (e.target as HTMLImageElement).parentElement;
-                    if (parent) {
-                      const fallback = document.createElement("p");
-                      fallback.className = `text-sm p-6 text-center ${isDark ? "text-white/60" : "text-slate-500"}`;
-                      fallback.textContent = slide.visual_hint ?? "";
-                      parent.appendChild(fallback);
-                    }
-                  }}
-                />
-              </div>
-            </div>
-          )}
         </div>
       </div>
 
       {/* Speaker notes panel */}
       {showNotes && slide.speaker_notes && (
         <div className="border-t border-border bg-amber-50 px-6 py-3 max-h-32 overflow-y-auto">
-          <p className="text-xs font-semibold text-amber-800 mb-1">Speaker Notes</p>
+          <p className="text-xs font-semibold text-amber-800 mb-1">
+            Speaker Notes
+          </p>
           <p className="text-sm text-amber-900/80">{slide.speaker_notes}</p>
         </div>
       )}
@@ -373,11 +413,21 @@ export default function LessonPage() {
       {/* Navigation */}
       <div className="flex items-center justify-between px-6 py-3 border-t border-border bg-white">
         <button
-          onClick={(e) => { e.stopPropagation(); goPrev(); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            goPrev();
+          }}
           disabled={currentIndex === 0}
           className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
             <polyline points="15 18 9 12 15 6" />
           </svg>
           Previous
@@ -387,7 +437,10 @@ export default function LessonPage() {
           {slides.map((_, i) => (
             <button
               key={i}
-              onClick={(e) => { e.stopPropagation(); setCurrentIndex(i); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setCurrentIndex(i);
+              }}
               className={`rounded-full transition-all duration-300 ${
                 i === currentIndex
                   ? "w-6 h-2 bg-blue-600"
@@ -399,12 +452,22 @@ export default function LessonPage() {
           ))}
         </div>
         <button
-          onClick={(e) => { e.stopPropagation(); goNext(); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            goNext();
+          }}
           disabled={currentIndex === slides.length - 1}
           className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
         >
           Next
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
             <polyline points="9 18 15 12 9 6" />
           </svg>
         </button>

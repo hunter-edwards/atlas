@@ -59,6 +59,9 @@ CREATE TABLE slides (
   body TEXT NOT NULL,
   speaker_notes TEXT,
   visual_hint TEXT,
+  visual_type TEXT DEFAULT 'none',
+  image_url TEXT,
+  diagram_code TEXT,
   order_index INT
 );
 

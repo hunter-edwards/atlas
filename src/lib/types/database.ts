@@ -201,6 +201,9 @@ export interface Database {
           body: string;
           speaker_notes: string | null;
           visual_hint: string | null;
+          visual_type: string | null;
+          image_url: string | null;
+          diagram_code: string | null;
           order_index: number | null;
         };
         Insert: {
@@ -210,6 +213,9 @@ export interface Database {
           body: string;
           speaker_notes?: string | null;
           visual_hint?: string | null;
+          visual_type?: string | null;
+          image_url?: string | null;
+          diagram_code?: string | null;
           order_index?: number | null;
         };
         Update: {
@@ -219,6 +225,9 @@ export interface Database {
           body?: string;
           speaker_notes?: string | null;
           visual_hint?: string | null;
+          visual_type?: string | null;
+          image_url?: string | null;
+          diagram_code?: string | null;
           order_index?: number | null;
         };
         Relationships: [

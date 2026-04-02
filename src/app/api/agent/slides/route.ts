@@ -1,16 +1,41 @@
 import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { getSlideGeneratorSystemPrompt } from "@/lib/prompts/slide-generator";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
+async function generateImage(prompt: string): Promise<string | null> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const openai = new OpenAI({ apiKey });
+    const result = await openai.images.generate({
+      model: "gpt-image-1-mini",
+      prompt: `Educational illustration for a learning slide: ${prompt}. Clean, professional style suitable for academic content. No text in the image.`,
+      size: "1024x1024",
+      quality: "low",
+    });
+
+    const b64 = result.data?.[0]?.b64_json;
+    if (b64) {
+      return `data:image/png;base64,${b64}`;
+    }
+    return null;
+  } catch (err) {
+    console.error("Image generation failed:", err);
+    return null;
+  }
+}
+
 export async function POST(req: Request) {
   const { lessonId, courseId } = await req.json();
 
   const supabase = createAdminClient();
 
-  // Fetch lesson, course, and module separately (avoids join issues)
+  // Fetch lesson, course, and module separately
   const { data: lesson, error: lessonErr } = await supabase
     .from("lessons")
     .select("*")
@@ -62,9 +87,11 @@ Generate exactly 8 slides following the lesson arc (Hook → Concept → Example
 
 IMPORTANT:
 - Return ONLY a valid JSON array, no markdown fences, no extra text
+- Include visualType for every slide ("illustration", "diagram", or "none")
+- For "diagram" slides, include valid Mermaid.js diagramCode
+- For "illustration" slides, write a detailed visualHint prompt
 - Keep each slide body to 3-5 bullet points (not full paragraphs)
 - Keep speakerNotes to 2-3 sentences max
-- Keep visualHint to 1 sentence
 - This must be valid, complete JSON that can be parsed`,
         },
       ],
@@ -78,23 +105,21 @@ IMPORTANT:
 
     let slides;
     try {
-      // Try to find a complete JSON array in the response
       const jsonMatch = responseText.match(/\[[\s\S]*\]/);
       slides = jsonMatch ? JSON.parse(jsonMatch[0]) : [];
     } catch {
-      // JSON might be truncated — try to salvage what we can
       console.error("Slide JSON truncated, attempting repair...");
       try {
-        // Find the start of the array
         const arrStart = responseText.indexOf("[");
         if (arrStart !== -1) {
           let text = responseText.slice(arrStart);
-          // Find the last complete object (ends with })
           const lastCompleteObj = text.lastIndexOf("}");
           if (lastCompleteObj !== -1) {
             text = text.slice(0, lastCompleteObj + 1) + "]";
             slides = JSON.parse(text);
-            console.log(`Repaired truncated JSON: recovered ${slides.length} slides`);
+            console.log(
+              `Repaired truncated JSON: recovered ${slides.length} slides`
+            );
           }
         }
       } catch (repairErr) {
@@ -105,12 +130,30 @@ IMPORTANT:
     }
 
     if (slides.length === 0) {
-      console.error("No slides generated. Response:", responseText.slice(0, 500));
+      console.error(
+        "No slides generated. Response:",
+        responseText.slice(0, 500)
+      );
       return Response.json(
         { error: "Failed to generate slides", slides: [] },
         { status: 500 }
       );
     }
+
+    // Generate images for illustration slides in parallel
+    const hasOpenAI = !!process.env.OPENAI_API_KEY;
+    const imagePromises = slides.map(
+      async (s: { visualType?: string; visual_type?: string; visualHint?: string; visual_hint?: string }) => {
+        const vType = s.visualType || s.visual_type || "none";
+        const vHint = s.visualHint || s.visual_hint || "";
+        if (hasOpenAI && vType === "illustration" && vHint) {
+          return generateImage(vHint);
+        }
+        return null;
+      }
+    );
+
+    const imageResults = await Promise.all(imagePromises);
 
     // Save slides to database
     const { error: insertErr } = await supabase.from("slides").insert(
@@ -123,6 +166,10 @@ IMPORTANT:
             speaker_notes?: string;
             visualHint?: string;
             visual_hint?: string;
+            visualType?: string;
+            visual_type?: string;
+            diagramCode?: string;
+            diagram_code?: string;
             orderIndex?: number;
             order_index?: number;
           },
@@ -133,6 +180,9 @@ IMPORTANT:
           body: s.body,
           speaker_notes: s.speakerNotes || s.speaker_notes || null,
           visual_hint: s.visualHint || s.visual_hint || null,
+          visual_type: s.visualType || s.visual_type || "none",
+          image_url: imageResults[i] || null,
+          diagram_code: s.diagramCode || s.diagram_code || null,
           order_index: s.orderIndex ?? s.order_index ?? i,
         })
       )
@@ -163,7 +213,9 @@ IMPORTANT:
   } catch (error) {
     console.error("Slide generation error:", error);
     return Response.json(
-      { error: `Failed to generate slides: ${error instanceof Error ? error.message : "Unknown error"}` },
+      {
+        error: `Failed to generate slides: ${error instanceof Error ? error.message : "Unknown error"}`,
+      },
       { status: 500 }
     );
   }
