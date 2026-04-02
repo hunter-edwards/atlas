@@ -52,7 +52,7 @@ Return a JSON array (NOT wrapped in an object). Each slide object must follow th
 - Misconception slides (Template E — two-column contrast IS the visual)
 - Stat/callout slides (Template D)
 
-**Expect 2-3 diagrams, 0-2 illustrations, and 4-5 "none" per lesson.**
+**Expect 2-3 diagrams, 1-2 illustrations, and 3-4 "none" per lesson. Every lesson should have at least 1 illustration.**
 
 ## Template Selection Rules
 - Hook → Template A (title/hook)
@@ -65,13 +65,14 @@ Return a JSON array (NOT wrapped in an object). Each slide object must follow th
 - Summary → Template A variant or Template B
 
 ## Color Archetype Selection
-Pick ONE archetype for the entire lesson based on the subject:
+Pick ONE archetype for the entire lesson based on the subject.
+PREFER light-background archetypes for readability — only use Obsidian when the course is explicitly premium/advanced.
 - Science/biology/nature → Naturalist
 - Engineering/tech/CS → Technician
 - Humanities/history/literature → Scholar
 - Business/design/architecture → Architect
 - General/mixed → Editorial
-- Premium/advanced/graduate → Obsidian
+- Premium/advanced/graduate-level → Obsidian (sparingly)
 
 ## Critical Rules
 - Return ONLY a valid JSON array — no markdown fences, no extra text
