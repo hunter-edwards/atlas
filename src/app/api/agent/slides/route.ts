@@ -8,7 +8,10 @@ export const maxDuration = 120;
 
 async function generateImage(
   prompt: string,
-  courseContext: string
+  courseTitle: string,
+  moduleTitle: string,
+  lessonTitle: string,
+  topicDescription: string
 ): Promise<string | null> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
@@ -17,15 +20,17 @@ async function generateImage(
     const openai = new OpenAI({ apiKey });
     const result = await openai.images.generate({
       model: "gpt-image-1",
-      prompt: `${courseContext}
+      prompt: `Educational illustration for a lesson on "${lessonTitle}" from the module "${moduleTitle}" in a course about ${topicDescription || courseTitle}.
 
-Create an educational illustration: ${prompt}
+Subject: ${prompt}
 
-Requirements:
-- Clean, professional style suitable for academic/educational content
-- DO NOT include any text, labels, or words in the image
-- Photorealistic or clean vector style depending on subject matter
-- Well-lit, clear composition focused on the subject`,
+Style requirements:
+- Horizontal landscape composition (wide format)
+- Clean, professional academic illustration style
+- Well-lit, clear subject matter with strong visual hierarchy
+- Photorealistic or clean technical illustration depending on subject
+- NO text, labels, captions, or words anywhere in the image
+- All terminology is in the context of ${topicDescription || courseTitle} — interpret domain-specific words accordingly`,
       size: "1536x1024",
       quality: "medium",
     });
@@ -70,9 +75,12 @@ export async function POST(req: Request) {
     .eq("id", lesson.module_id)
     .single();
 
-  // Build course context string for image generation — prevents ambiguity
-  // (e.g. "flute" in corrugated packaging vs. musical instrument)
-  const courseContext = `Context: This image is for an educational course about "${course?.topic_description || course?.title || ""}". The course is titled "${course?.title || ""}". The current module is "${module?.title || ""}" and the lesson is "${lesson.title}". All terminology should be interpreted in the context of this specific subject matter.`;
+  // Individual context fields passed to image generation to prevent domain ambiguity
+  // (e.g. "flute" in corrugated packaging must not render as a musical instrument)
+  const courseTitle = course?.title || "Unknown Course";
+  const moduleTitle = module?.title || "Unknown Module";
+  const lessonTitle = lesson.title;
+  const topicDescription = course?.topic_description || "";
 
   const client = new Anthropic();
 
@@ -167,7 +175,7 @@ IMPORTANT:
         const vType = s.visualType || s.visual_type || "none";
         const vHint = s.visualHint || s.visual_hint || "";
         if (hasOpenAI && vType === "illustration" && vHint) {
-          return generateImage(vHint, courseContext);
+          return generateImage(vHint, courseTitle, moduleTitle, lessonTitle, topicDescription);
         }
         return null;
       }
