@@ -54,16 +54,6 @@ Return a JSON array (NOT wrapped in an object). Each slide object must follow th
 
 **Expect 2-3 diagrams, 1-2 illustrations, and 3-4 "none" per lesson. Every lesson should have at least 1 illustration.**
 
-## Template Selection Rules
-- Hook → Template A (title/hook)
-- Overview → Template B (no visual) or Template F (steps)
-- Core concept with visual → Template C (full-bleed) or Template B (split)
-- Worked example → Template B or Template G (code)
-- Misconceptions → Template E (two-column comparison)
-- Stat or key fact → Template D (callout)
-- Practice prompt → Template D or Template B
-- Summary → Template A variant or Template B
-
 ## Color Archetype Selection
 Pick ONE archetype for the entire lesson based on the subject.
 PREFER light-background archetypes for readability — only use Obsidian when the course is explicitly premium/advanced.
@@ -74,11 +64,32 @@ PREFER light-background archetypes for readability — only use Obsidian when th
 - General/mixed → Editorial
 - Premium/advanced/graduate-level → Obsidian (sparingly)
 
+## Markdown Formatting Rules (CRITICAL)
+- NEVER use inline bullet characters like "• item1 • item2 • item3" on a single line
+- Each bullet point MUST be on its own line using "- " prefix:
+  WRONG: "**Topics:** • Flutes • Liners • Adhesives"
+  RIGHT: "**Topics:**\n\n- Flutes\n- Liners\n- Adhesives"
+- Use proper markdown: "- " for unordered lists, "1. " for ordered lists
+- Each list item gets its own line with a newline before the first item
+- Paragraphs must be separated by blank lines ("\\n\\n")
+- Body text should have substance — at least 3-4 bullet points or 2-3 sentences per slide
+
+## Template Selection Rules (STRICT)
+- ANY slide with a diagram (visualType "diagram") MUST use Template C (full-bleed visual)
+- ANY slide with an illustration MUST use Template B (split) or Template C (full-bleed)
+- Hook/opener → Template A
+- Overview with a roadmap list → Template F (step/process) — NOT Template B
+- Stat or key fact → Template D (centered callout)
+- Misconceptions/comparison → Template E (two-column)
+- Code → Template G
+- Text-only instruction → Template B
+
 ## Critical Rules
 - Return ONLY a valid JSON array — no markdown fences, no extra text
 - Generate exactly 8 slides following the lesson arc
 - ALL slides in a lesson use the SAME colorArchetype
 - Every slide uses one of the 7 layout templates (A-G)
 - Max 1 callout panel per slide
+- Diagrams → Template C always. No exceptions.
 - The output must be valid, parseable JSON`;
 }

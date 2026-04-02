@@ -83,6 +83,19 @@ function getArchetype(slide: Slide): ArchetypeTokens {
   return ARCHETYPES[name] ?? ARCHETYPES.Scholar;
 }
 
+// Fix AI-generated inline bullets ("• item1 • item2") → proper markdown list
+function normalizeBody(body: string): string {
+  if (!body) return body;
+  // Convert inline • bullets to newline-separated markdown list items
+  if (body.includes("•")) {
+    body = body.replace(/\s*•\s*/g, "\n- ");
+  }
+  // Ensure list items after a label get a blank line separator
+  // "**Label:**\n- item" → "**Label:**\n\n- item"
+  body = body.replace(/(:)\n(-\s)/g, "$1\n\n$2");
+  return body;
+}
+
 // ─── Callout Panel ─────────────────────────────────────────────────────────────
 
 const CALLOUT_META: Record<string, { label: string; bg: string; border: string; labelColor: string }> = {
@@ -208,7 +221,7 @@ function TemplateA({ slide, tokens, label }: { slide: Slide; tokens: ArchetypeTo
 
       {/* Body as hook/subtitle */}
       <div style={{ maxWidth: "55%", color: tokens.textMuted, fontSize: "1.15rem", lineHeight: 1.6, fontFamily: "'IBM Plex Sans', sans-serif" }}>
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{slide.body}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{normalizeBody(slide.body)}</ReactMarkdown>
       </div>
 
       {/* Module label */}
@@ -238,19 +251,20 @@ function TemplateB({ slide, tokens }: { slide: Slide; tokens: ArchetypeTokens })
       )}
 
       {/* Content row */}
-      <div style={{ display: "flex", gap: 40, flex: 1, alignItems: "flex-start", overflow: "hidden" }}>
-        {/* Left: body (55%) */}
-        <div style={{ flex: hasVisual ? "0 0 55%" : "1", minWidth: 0, color: tokens.text, fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.95rem", lineHeight: 1.65 }}>
+      <div style={{ display: "flex", gap: 40, flex: 1, alignItems: "center", overflow: "hidden" }}>
+        {/* Left: body */}
+        <div style={{ flex: hasVisual ? "0 0 50%" : "1", minWidth: 0, color: tokens.text, fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "1rem", lineHeight: 1.7 }}>
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
-              ul: ({ children }) => <ul style={{ paddingLeft: "1.2em", margin: "0 0 12px 0" }}>{children}</ul>,
-              li: ({ children }) => <li style={{ marginBottom: 10, lineHeight: 1.6 }}>{children}</li>,
+              ul: ({ children }) => <ul style={{ paddingLeft: "1.4em", margin: "8px 0 16px 0", listStyleType: "disc" }}>{children}</ul>,
+              ol: ({ children }) => <ol style={{ paddingLeft: "1.4em", margin: "8px 0 16px 0" }}>{children}</ol>,
+              li: ({ children }) => <li style={{ marginBottom: 12, lineHeight: 1.65, paddingLeft: 4 }}>{children}</li>,
               strong: ({ children }) => <strong style={{ color: tokens.accent, fontWeight: 600 }}>{children}</strong>,
-              p: ({ children }) => <p style={{ margin: "0 0 12px 0" }}>{children}</p>,
+              p: ({ children }) => <p style={{ margin: "0 0 16px 0" }}>{children}</p>,
             }}
           >
-            {slide.body}
+            {normalizeBody(slide.body)}
           </ReactMarkdown>
 
           {slide.callout_text && slide.callout_type && (
@@ -258,9 +272,9 @@ function TemplateB({ slide, tokens }: { slide: Slide; tokens: ArchetypeTokens })
           )}
         </div>
 
-        {/* Right: visual (40%) */}
+        {/* Right: visual (45%) */}
         {hasVisual && (
-          <div style={{ flex: "0 0 40%", minWidth: 0 }}>
+          <div style={{ flex: "0 0 45%", minWidth: 0 }}>
             {visual}
           </div>
         )}
@@ -293,8 +307,8 @@ function TemplateC({ slide, tokens }: { slide: Slide; tokens: ArchetypeTokens })
       )}
 
       {/* Caption from body */}
-      <div style={{ color: tokens.textMuted, fontSize: "0.85rem", lineHeight: 1.5, fontFamily: "'IBM Plex Sans', sans-serif", fontStyle: "italic" }}>
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{slide.body}</ReactMarkdown>
+      <div style={{ color: tokens.textMuted, fontSize: "0.9rem", lineHeight: 1.55, fontFamily: "'IBM Plex Sans', sans-serif", fontStyle: "italic" }}>
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{normalizeBody(slide.body)}</ReactMarkdown>
       </div>
     </div>
   );
@@ -322,8 +336,8 @@ function TemplateD({ slide, tokens }: { slide: Slide; tokens: ArchetypeTokens })
       )}
 
       {/* Context statement */}
-      <div style={{ color: tokens.textMuted, fontSize: "1.05rem", lineHeight: 1.65, maxWidth: "60%", fontFamily: "'IBM Plex Sans', sans-serif" }}>
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{slide.body}</ReactMarkdown>
+      <div style={{ color: tokens.textMuted, fontSize: "1.1rem", lineHeight: 1.65, maxWidth: "60%", fontFamily: "'IBM Plex Sans', sans-serif" }}>
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{normalizeBody(slide.body)}</ReactMarkdown>
       </div>
     </div>
   );
@@ -333,8 +347,9 @@ function TemplateD({ slide, tokens }: { slide: Slide; tokens: ArchetypeTokens })
 
 function TemplateE({ slide, tokens }: { slide: Slide; tokens: ArchetypeTokens }) {
   // Parse body: look for "---" separator between columns, or split on double newline
-  const parts = slide.body.split(/\n---\n|\n\n---\n\n/);
-  const left = parts[0] ?? slide.body;
+  const normalized = normalizeBody(slide.body);
+  const parts = normalized.split(/\n---\n|\n\n---\n\n/);
+  const left = parts[0] ?? normalized;
   const right = parts[1] ?? "";
 
   const colStyle = {
@@ -404,7 +419,7 @@ function TemplateE({ slide, tokens }: { slide: Slide; tokens: ArchetypeTokens })
 
 function TemplateF({ slide, tokens }: { slide: Slide; tokens: ArchetypeTokens }) {
   // Parse numbered steps from body markdown
-  const lines = slide.body.split("\n").filter((l) => l.trim());
+  const lines = normalizeBody(slide.body).split("\n").filter((l) => l.trim());
   const steps: { num: string; title: string; desc: string }[] = [];
 
   let i = 0;
@@ -423,7 +438,18 @@ function TemplateF({ slide, tokens }: { slide: Slide; tokens: ArchetypeTokens })
   }
 
   // Fallback: if no numbered steps found, treat each line as a step
-  const displaySteps = steps.length > 0 ? steps : lines.slice(0, 5).map((l, idx) => ({ num: String(idx + 1), title: l.replace(/^[-*]\s+/, ""), desc: "" }));
+  // Also handle markdown list items "- Item" and bold items "**Item**"
+  if (steps.length === 0) {
+    let stepNum = 1;
+    for (const line of lines) {
+      const cleaned = line.replace(/^[-*]\s+/, "").replace(/^\*\*(.+?)\*\*(.*)$/, "$1$2").trim();
+      if (cleaned) {
+        steps.push({ num: String(stepNum++), title: cleaned, desc: "" });
+      }
+      if (stepNum > 6) break;
+    }
+  }
+  const displaySteps = steps.length > 0 ? steps : [{ num: "1", title: normalizeBody(slide.body), desc: "" }];
 
   return (
     <div style={{ padding: "48px 64px", height: "100%", display: "flex", flexDirection: "column" }}>
@@ -438,14 +464,14 @@ function TemplateF({ slide, tokens }: { slide: Slide; tokens: ArchetypeTokens })
       )}
 
       {/* Steps */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 20, flex: 1 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 24, flex: 1, justifyContent: "center" }}>
         {displaySteps.map((step) => (
-          <div key={step.num} style={{ display: "flex", gap: 20, alignItems: "flex-start" }}>
+          <div key={step.num} style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
             {/* Step number */}
             <div style={{
               flexShrink: 0,
-              width: 36,
-              height: 36,
+              width: 44,
+              height: 44,
               borderRadius: "50%",
               background: tokens.accent,
               color: tokens.isDark ? tokens.bg : "#fff",
@@ -453,17 +479,17 @@ function TemplateF({ slide, tokens }: { slide: Slide; tokens: ArchetypeTokens })
               alignItems: "center",
               justifyContent: "center",
               fontFamily: "'IBM Plex Sans', sans-serif",
-              fontSize: "0.9rem",
+              fontSize: "1rem",
               fontWeight: 700,
             }}>
               {step.num}
             </div>
-            <div>
-              <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontWeight: 600, fontSize: "1rem", color: tokens.text, margin: "4px 0 4px 0", lineHeight: 1.3 }}>
+            <div style={{ flex: 1 }}>
+              <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontWeight: 600, fontSize: "1.1rem", color: tokens.text, margin: "8px 0 6px 0", lineHeight: 1.3 }}>
                 {step.title}
               </p>
               {step.desc && (
-                <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.875rem", color: tokens.textMuted, margin: 0, lineHeight: 1.55 }}>
+                <p style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "0.95rem", color: tokens.textMuted, margin: 0, lineHeight: 1.55 }}>
                   {step.desc}
                 </p>
               )}
@@ -533,8 +559,15 @@ function TemplateG({ slide, tokens }: { slide: Slide; tokens: ArchetypeTokens })
 
 function SlideRenderer({ slide, index, total }: { slide: Slide; index: number; total: number }) {
   const tokens = getArchetype(slide);
-  const template = (slide.layout_template || (index === 0 ? "A" : index === total - 1 ? "A" : "B")) as string;
+  let template = (slide.layout_template || (index === 0 ? "A" : index === total - 1 ? "A" : "B")) as string;
   const label = `${index + 1} of ${total}`;
+
+  // Auto-promote: diagram slides should always use full-bleed Template C
+  const hasDiagram = slide.visual_type === "diagram" && !!slide.diagram_code;
+  const hasImage = !!slide.image_url;
+  if (hasDiagram && template === "B") template = "C";
+  // Slides with images that got assigned to non-visual templates → promote to B
+  if (hasImage && !["B", "C"].includes(template)) template = "B";
 
   const inner = (() => {
     switch (template) {
