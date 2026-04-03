@@ -5,7 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 async function uploadImageToStorage(
   b64: string,
@@ -60,9 +60,7 @@ async function generateImage(
 
   try {
     const openai = new OpenAI({ apiKey });
-    const result = await openai.images.generate({
-      model: "gpt-image-1",
-      prompt: `Educational illustration for a lesson on "${lessonTitle}" from the module "${moduleTitle}" in a course about ${topicDescription || courseTitle}.
+    const imagePrompt = `Educational illustration for a lesson on "${lessonTitle}" from the module "${moduleTitle}" in a course about ${topicDescription || courseTitle}.
 
 Subject: ${prompt}
 
@@ -72,16 +70,41 @@ Style requirements:
 - Well-lit, clear subject matter with strong visual hierarchy
 - Photorealistic or clean technical illustration depending on subject
 - NO text, labels, captions, or words anywhere in the image
-- All terminology is in the context of ${topicDescription || courseTitle} — interpret domain-specific words accordingly`,
-      size: "1536x1024",
-      quality: "medium",
-    });
+- All terminology is in the context of ${topicDescription || courseTitle} — interpret domain-specific words accordingly`;
 
-    const b64 = result.data?.[0]?.b64_json;
+    // Try with output_format first (gpt-image-1 in newer SDK versions)
+    let b64: string | undefined;
+    try {
+      const result = await openai.images.generate({
+        model: "gpt-image-1",
+        prompt: imagePrompt,
+        size: "1536x1024",
+        quality: "medium",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
+
+      // Handle both response formats: b64_json (older) and b64 (newer SDK)
+      const item = result.data?.[0];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      b64 = (item as any)?.b64_json || (item as any)?.b64 || undefined;
+
+      // If neither b64 format, check if there's a URL we can fetch
+      if (!b64 && item?.url) {
+        const imgRes = await fetch(item.url);
+        if (imgRes.ok) {
+          const arrBuf = await imgRes.arrayBuffer();
+          b64 = Buffer.from(arrBuf).toString("base64");
+        }
+      }
+    } catch (innerErr) {
+      console.error("Image generate call failed:", innerErr);
+      return null;
+    }
+
     if (b64) {
-      // Try to upload to Supabase Storage for a stable URL, fall back to data URL
       return await uploadImageToStorage(b64, lessonId, slideIndex);
     }
+    console.error("Image generation returned no image data");
     return null;
   } catch (err) {
     console.error("Image generation failed:", err);
@@ -218,7 +241,13 @@ IMPORTANT:
         const vType = s.visualType || s.visual_type || "none";
         const vHint = s.visualHint || s.visual_hint || "";
         if (hasOpenAI && vType === "illustration" && vHint) {
-          return generateImage(vHint, courseTitle, moduleTitle, lessonTitle, topicDescription, lessonId, idx);
+          console.log(`Generating image for slide ${idx}: "${vHint.slice(0, 80)}..."`);
+          const img = await generateImage(vHint, courseTitle, moduleTitle, lessonTitle, topicDescription, lessonId, idx);
+          console.log(`Slide ${idx} image result: ${img ? `${img.slice(0, 60)}...` : "null"}`);
+          return img;
+        }
+        if (vType === "illustration" && !hasOpenAI) {
+          console.warn("OPENAI_API_KEY not set — skipping image generation");
         }
         return null;
       }
