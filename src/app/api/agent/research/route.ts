@@ -243,6 +243,7 @@ Your JSON must include these top-level fields:
             description?: string;
             lessons?: { title: string; estimatedDurationMinutes?: number }[];
             quiz?: { title?: string; quizType?: string };
+            quizzes?: { title?: string; quiz_type?: string; quizType?: string }[];
           }[];
           finalExam?: boolean;
           endDate?: string;
@@ -392,23 +393,31 @@ Your JSON must include these top-level fields:
             await supabase.from("lessons").insert(lessonInserts);
           }
 
-          if (mod.quiz) {
-            const quizDate =
-              schedule.find(
-                (s) =>
-                  s.type === "quiz" &&
-                  s.quizType === "module_exam" &&
-                  s.moduleIndex === mi
-              )?.date || null;
+          // Always create a module exam quiz for every module
+          // Handle both "quiz" (singular) and "quizzes" (array) from LLM output
+          const quizDate =
+            schedule.find(
+              (s) =>
+                s.type === "quiz" &&
+                s.quizType === "module_exam" &&
+                s.moduleIndex === mi
+            )?.date || null;
 
-            await supabase.from("quizzes").insert({
-              course_id: course.id,
-              module_id: moduleData.id,
-              title: mod.quiz.title || `Module ${mi + 1} Exam`,
-              quiz_type: "module_exam",
-              scheduled_date: quizDate,
-            });
-          }
+          const quizTitle =
+            mod.quiz?.title ||
+            mod.quizzes?.find(
+              (q) =>
+                (q.quiz_type || q.quizType) === "module_exam"
+            )?.title ||
+            `Module ${mi + 1} Exam`;
+
+          await supabase.from("quizzes").insert({
+            course_id: course.id,
+            module_id: moduleData.id,
+            title: quizTitle,
+            quiz_type: "module_exam",
+            scheduled_date: quizDate,
+          });
         }
 
         if (curriculum.finalExam) {
