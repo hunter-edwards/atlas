@@ -150,10 +150,17 @@ function MermaidDiagram({ code, isDark }: { code: string; isDark: boolean }) {
           startOnLoad: false,
           theme: isDark ? "dark" : "default",
           fontFamily: "IBM Plex Sans, sans-serif",
-          flowchart: { curve: "basis", padding: 15 },
+          flowchart: { curve: "basis", padding: 10, nodeSpacing: 30, rankSpacing: 30 },
+          fontSize: 13,
+          maxTextSize: 50000,
         });
         const id = `mermaid-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        const { svg: rendered } = await mermaid.render(id, code);
+        let { svg: rendered } = await mermaid.render(id, code);
+        // Force SVG to fit container by setting width/height to 100% and preserving aspect ratio
+        rendered = rendered
+          .replace(/(<svg[^>]*?)(?:\s+width="[^"]*")/i, '$1')
+          .replace(/(<svg[^>]*?)(?:\s+height="[^"]*")/i, '$1')
+          .replace(/(<svg)/i, '$1 style="width:100%;height:auto;max-height:100%"');
         if (!cancelled) setSvg(rendered);
       } catch (err) {
         console.error("Mermaid render failed:", err);
@@ -166,7 +173,12 @@ function MermaidDiagram({ code, isDark }: { code: string; isDark: boolean }) {
   }, [code, isDark]);
 
   return (
-    <div ref={containerRef} className="flex items-center justify-center" dangerouslySetInnerHTML={{ __html: svg }} />
+    <div
+      ref={containerRef}
+      className="flex items-center justify-center"
+      style={{ maxHeight: "100%", overflow: "auto" }}
+      dangerouslySetInnerHTML={{ __html: svg }}
+    />
   );
 }
 
@@ -187,7 +199,7 @@ function VisualZone({ slide, tokens }: { slide: Slide; tokens: ArchetypeTokens }
 
   if (hasDiagram) {
     return (
-      <div style={{ background: tokens.mid, borderRadius: 10, padding: "16px", border: `1px solid ${tokens.accentAlpha(0.12)}` }}>
+      <div style={{ background: tokens.mid, borderRadius: 10, padding: "16px", border: `1px solid ${tokens.accentAlpha(0.12)}`, maxHeight: "100%", overflow: "auto" }}>
         <MermaidDiagram code={slide.diagram_code!} isDark={tokens.isDark} />
       </div>
     );
@@ -300,8 +312,8 @@ function TemplateC({ slide, tokens }: { slide: Slide; tokens: ArchetypeTokens })
 
       {/* Visual — dominant */}
       {hasVisual && (
-        <div style={{ flex: 1, minHeight: 0, marginBottom: 16, display: "flex", alignItems: "center" }}>
-          <div style={{ width: "100%", maxHeight: "100%" }}>
+        <div style={{ flex: 1, minHeight: 0, marginBottom: 16, display: "flex", alignItems: "center", overflow: "hidden" }}>
+          <div style={{ width: "100%", maxHeight: "100%", overflow: "auto" }}>
             <VisualZone slide={slide} tokens={tokens} />
           </div>
         </div>
