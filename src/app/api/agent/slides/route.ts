@@ -2,16 +2,58 @@ import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import { getSlideGeneratorSystemPrompt } from "@/lib/prompts/slide-generator";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
+
+async function uploadImageToStorage(
+  b64: string,
+  lessonId: string,
+  slideIndex: number
+): Promise<string | null> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRoleKey) return null;
+
+  try {
+    const supabase = createSupabaseClient(supabaseUrl, serviceRoleKey);
+    const buffer = Buffer.from(b64, "base64");
+    const filePath = `slides/${lessonId}/${slideIndex}-${Date.now()}.png`;
+
+    const { error } = await supabase.storage
+      .from("slide-images")
+      .upload(filePath, buffer, {
+        contentType: "image/png",
+        upsert: true,
+      });
+
+    if (error) {
+      console.error("Storage upload error:", error);
+      // Fall back to data URL
+      return `data:image/png;base64,${b64}`;
+    }
+
+    const { data: urlData } = supabase.storage
+      .from("slide-images")
+      .getPublicUrl(filePath);
+
+    return urlData.publicUrl;
+  } catch (err) {
+    console.error("Storage upload failed:", err);
+    // Fall back to data URL
+    return `data:image/png;base64,${b64}`;
+  }
+}
 
 async function generateImage(
   prompt: string,
   courseTitle: string,
   moduleTitle: string,
   lessonTitle: string,
-  topicDescription: string
+  topicDescription: string,
+  lessonId: string,
+  slideIndex: number
 ): Promise<string | null> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
@@ -37,7 +79,8 @@ Style requirements:
 
     const b64 = result.data?.[0]?.b64_json;
     if (b64) {
-      return `data:image/png;base64,${b64}`;
+      // Try to upload to Supabase Storage for a stable URL, fall back to data URL
+      return await uploadImageToStorage(b64, lessonId, slideIndex);
     }
     return null;
   } catch (err) {
@@ -171,11 +214,11 @@ IMPORTANT:
         visual_type?: string;
         visualHint?: string;
         visual_hint?: string;
-      }) => {
+      }, idx: number) => {
         const vType = s.visualType || s.visual_type || "none";
         const vHint = s.visualHint || s.visual_hint || "";
         if (hasOpenAI && vType === "illustration" && vHint) {
-          return generateImage(vHint, courseTitle, moduleTitle, lessonTitle, topicDescription);
+          return generateImage(vHint, courseTitle, moduleTitle, lessonTitle, topicDescription, lessonId, idx);
         }
         return null;
       }

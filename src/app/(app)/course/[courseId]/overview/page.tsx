@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import type { Course, Module, Lesson, Source } from "@/lib/types";
+import type { Course, Module, Lesson, Source, Quiz } from "@/lib/types";
 
 interface StudyGuide {
   type: string;
@@ -36,6 +36,7 @@ export default function CourseOverviewPage() {
   const [modules, setModules] = useState<(Module & { lessons: Lesson[] })[]>(
     []
   );
+  const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [sources, setSources] = useState<Source[]>([]);
   const [expandedModules, setExpandedModules] = useState<Set<string>>(
     new Set()
@@ -50,7 +51,7 @@ export default function CourseOverviewPage() {
     const supabase = createClient();
 
     async function load() {
-      const [courseRes, modulesRes, lessonsRes, sourcesRes] = await Promise.all([
+      const [courseRes, modulesRes, lessonsRes, quizzesRes, sourcesRes] = await Promise.all([
         supabase.from("courses").select("*").eq("id", courseId).single(),
         supabase
           .from("modules")
@@ -62,6 +63,10 @@ export default function CourseOverviewPage() {
           .select("*")
           .eq("course_id", courseId)
           .order("order_index"),
+        supabase
+          .from("quizzes")
+          .select("*")
+          .eq("course_id", courseId),
         supabase
           .from("sources")
           .select("*")
@@ -81,6 +86,7 @@ export default function CourseOverviewPage() {
           setExpandedModules(new Set([modulesRes.data[0].id]));
         }
       }
+      if (quizzesRes.data) setQuizzes(quizzesRes.data);
       if (sourcesRes.data) setSources(sourcesRes.data);
     }
 
@@ -233,6 +239,33 @@ export default function CourseOverviewPage() {
                       </span>
                     </Link>
                   ))}
+                  {/* Module quiz link */}
+                  {quizzes
+                    .filter((q) => q.module_id === mod.id)
+                    .map((quiz) => (
+                      <Link
+                        key={quiz.id}
+                        href={`/course/${courseId}/quiz/${quiz.id}`}
+                        className="flex items-center justify-between py-1.5 text-sm hover:text-accent transition-colors"
+                      >
+                        <span className="flex items-center gap-2">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-amber-600">
+                            <path d="M9 11l3 3L22 4" />
+                            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                          </svg>
+                          {quiz.title || "Module Exam"}
+                        </span>
+                        <span
+                          className={`text-xs px-2 py-0.5 rounded-full ${
+                            quiz.status === "completed"
+                              ? "bg-green-100 text-green-700"
+                              : "bg-amber-50 text-amber-700"
+                          }`}
+                        >
+                          {quiz.status === "completed" ? "completed" : "quiz"}
+                        </span>
+                      </Link>
+                    ))}
                   <button
                     onClick={() => generateModuleSummary(mod.id)}
                     disabled={generatingModSummary === mod.id}
@@ -282,6 +315,34 @@ export default function CourseOverviewPage() {
             </div>
           ))}
         </div>
+
+        {/* Final exam link */}
+        {quizzes
+          .filter((q) => q.quiz_type === "final_exam" && !q.module_id)
+          .map((quiz) => (
+            <Link
+              key={quiz.id}
+              href={`/course/${courseId}/quiz/${quiz.id}`}
+              className="flex items-center justify-between mt-3 border border-amber-200 bg-amber-50 rounded-md px-4 py-3 text-sm font-medium hover:bg-amber-100 transition-colors"
+            >
+              <span className="flex items-center gap-2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-amber-600">
+                  <path d="M9 11l3 3L22 4" />
+                  <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                </svg>
+                {quiz.title || "Final Exam"}
+              </span>
+              <span
+                className={`text-xs px-2 py-0.5 rounded-full ${
+                  quiz.status === "completed"
+                    ? "bg-green-100 text-green-700"
+                    : "bg-amber-100 text-amber-700"
+                }`}
+              >
+                {quiz.status === "completed" ? "completed" : "final exam"}
+              </span>
+            </Link>
+          ))}
       </section>
 
       {/* Study Guide */}

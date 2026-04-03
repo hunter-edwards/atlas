@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { createClient } from "@/lib/supabase/client";
@@ -598,6 +599,338 @@ function SlideRenderer({ slide, index, total }: { slide: Slide; index: number; t
   );
 }
 
+// ─── Export Dropdown ──────────────────────────────────────────────────────────
+
+function ExportDropdown({ slides, lessonTitle }: { slides: Slide[]; lessonTitle: string }) {
+  const [open, setOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  async function exportPDF() {
+    setExporting(true);
+    setOpen(false);
+    try {
+      // Dynamic import to avoid bundling on page load
+      const { jsPDF } = await import("jspdf");
+      const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: [1280, 720] });
+
+      for (let i = 0; i < slides.length; i++) {
+        const s = slides[i];
+        if (i > 0) doc.addPage([1280, 720], "landscape");
+
+        // Background
+        doc.setFillColor(245, 240, 232);
+        doc.rect(0, 0, 1280, 720, "F");
+
+        // Accent bar
+        doc.setFillColor(26, 58, 42);
+        doc.rect(64, 60, 48, 4, "F");
+
+        // Title
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(32);
+        doc.setTextColor(26, 26, 26);
+        doc.text(s.title || `Slide ${i + 1}`, 64, 120, { maxWidth: 900 });
+
+        // Body text
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(16);
+        doc.setTextColor(80, 80, 80);
+        const body = (s.body || "")
+          .replace(/\*\*/g, "")
+          .replace(/[*_`]/g, "")
+          .replace(/^#+\s/gm, "")
+          .replace(/^[-*]\s/gm, "\u2022 ");
+        const lines = doc.splitTextToSize(body, 1100);
+        doc.text(lines, 64, 180, { lineHeightFactor: 1.6 });
+
+        // Slide number
+        doc.setFontSize(11);
+        doc.setTextColor(140, 140, 140);
+        doc.text(`${i + 1} / ${slides.length}`, 1216, 690, { align: "right" });
+
+        // If slide has an image, try to embed it
+        if (s.image_url) {
+          try {
+            doc.addImage(s.image_url, "PNG", 700, 160, 500, 333);
+          } catch {
+            // Skip if image can't be embedded
+          }
+        }
+      }
+
+      doc.save(`${lessonTitle.replace(/[^a-zA-Z0-9 ]/g, "").replace(/\s+/g, "_")}_slides.pdf`);
+    } catch (err) {
+      console.error("PDF export failed:", err);
+      alert("PDF export failed. Please try again.");
+    }
+    setExporting(false);
+  }
+
+  async function exportPPTX() {
+    setExporting(true);
+    setOpen(false);
+    try {
+      const PptxGenJS = (await import("pptxgenjs")).default;
+      const pptx = new PptxGenJS();
+      pptx.layout = "LAYOUT_WIDE";
+
+      for (let i = 0; i < slides.length; i++) {
+        const s = slides[i];
+        const pptSlide = pptx.addSlide();
+        pptSlide.background = { color: "F5F0E8" };
+
+        // Accent bar
+        pptSlide.addShape(pptx.ShapeType.rect, {
+          x: 0.7, y: 0.5, w: 0.6, h: 0.05,
+          fill: { color: "1A3A2A" },
+        });
+
+        // Title
+        pptSlide.addText(s.title || `Slide ${i + 1}`, {
+          x: 0.7, y: 0.7, w: 8, h: 0.8,
+          fontSize: 28, fontFace: "Helvetica", bold: true,
+          color: "1A1A1A",
+        });
+
+        // Body
+        const body = (s.body || "")
+          .replace(/\*\*/g, "")
+          .replace(/[*_`]/g, "")
+          .replace(/^#+\s/gm, "")
+          .replace(/^[-*]\s/gm, "\u2022 ");
+        pptSlide.addText(body, {
+          x: 0.7, y: 1.7, w: s.image_url ? 5.5 : 11, h: 4.5,
+          fontSize: 14, fontFace: "Helvetica",
+          color: "505050", lineSpacingMultiple: 1.5,
+          valign: "top",
+        });
+
+        // Image
+        if (s.image_url) {
+          try {
+            pptSlide.addImage({
+              data: s.image_url,
+              x: 7, y: 1.7, w: 5, h: 3.33,
+            });
+          } catch {
+            // Skip if image can't be embedded
+          }
+        }
+
+        // Slide number
+        pptSlide.addText(`${i + 1} / ${slides.length}`, {
+          x: 11, y: 7, w: 1.5, h: 0.3,
+          fontSize: 10, color: "8C8C8C", align: "right",
+        });
+
+        // Speaker notes
+        if (s.speaker_notes) {
+          pptSlide.addNotes(s.speaker_notes);
+        }
+      }
+
+      await pptx.writeFile({ fileName: `${lessonTitle.replace(/[^a-zA-Z0-9 ]/g, "").replace(/\s+/g, "_")}_slides.pptx` });
+    } catch (err) {
+      console.error("PPTX export failed:", err);
+      alert("PPTX export failed. Please try again.");
+    }
+    setExporting(false);
+  }
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      <button
+        onClick={() => setOpen(!open)}
+        disabled={exporting}
+        className="text-xs border border-border rounded px-2 py-1 text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+      >
+        {exporting ? "Exporting..." : "Export"}
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 bg-white border border-border rounded-md shadow-lg z-50 min-w-[140px]">
+          <button
+            onClick={exportPDF}
+            className="w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors flex items-center gap-2"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            PDF
+          </button>
+          <button
+            onClick={exportPPTX}
+            className="w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors flex items-center gap-2 border-t border-border"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+            PowerPoint
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Lesson Chat ──────────────────────────────────────────────────────────────
+
+interface ChatMsg {
+  role: "user" | "assistant";
+  content: string;
+}
+
+function LessonChat({
+  courseId,
+  lessonId,
+  currentSlide,
+  lessonTitle,
+}: {
+  courseId: string;
+  lessonId: string;
+  currentSlide: Slide;
+  lessonTitle: string;
+}) {
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  async function sendMessage(e: React.FormEvent) {
+    e.preventDefault();
+    const text = input.trim();
+    if (!text || loading) return;
+
+    const userMsg: ChatMsg = { role: "user", content: text };
+    setMessages((prev) => [...prev, userMsg]);
+    setInput("");
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/agent/lesson-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          courseId,
+          lessonId,
+          message: text,
+          history: messages,
+          currentSlide: {
+            title: currentSlide.title,
+            body: currentSlide.body,
+          },
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.response) {
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: data.response },
+        ]);
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: "Sorry, I couldn't process that. Please try again." },
+        ]);
+      }
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "Network error. Please try again." },
+      ]);
+    }
+
+    setLoading(false);
+  }
+
+  return (
+    <div className="flex flex-col h-full bg-gray-50">
+      {/* Chat header */}
+      <div className="flex-shrink-0 px-4 py-2 border-b border-border bg-white">
+        <div className="flex items-center gap-2">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-blue-600">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span className="text-sm font-medium">Ask about this lesson</span>
+          <span className="text-xs text-muted-foreground">— {lessonTitle}</span>
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3">
+        {messages.length === 0 && (
+          <div className="text-center text-muted-foreground text-sm py-6">
+            <p className="mb-2">Have a question about what you&apos;re learning?</p>
+            <p className="text-xs">Ask anything about this lesson&apos;s content and I&apos;ll help clarify.</p>
+          </div>
+        )}
+        {messages.map((msg, i) => (
+          <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+            <div
+              className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
+                msg.role === "user"
+                  ? "bg-blue-600 text-white"
+                  : "bg-white border border-border text-foreground"
+              }`}
+            >
+              {msg.role === "assistant" ? (
+                <div className="prose prose-sm max-w-none [&_p]:mb-2 [&_p:last-child]:mb-0 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                </div>
+              ) : (
+                <p className="whitespace-pre-wrap">{msg.content}</p>
+              )}
+            </div>
+          </div>
+        ))}
+        {loading && (
+          <div className="flex justify-start">
+            <div className="bg-white border border-border rounded-lg px-3 py-2 text-sm text-muted-foreground">
+              <span className="inline-flex gap-1">
+                <span className="animate-bounce" style={{ animationDelay: "0ms" }}>.</span>
+                <span className="animate-bounce" style={{ animationDelay: "150ms" }}>.</span>
+                <span className="animate-bounce" style={{ animationDelay: "300ms" }}>.</span>
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Input */}
+      <form onSubmit={sendMessage} className="flex-shrink-0 px-4 py-3 border-t border-border bg-white">
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Ask a question about this slide..."
+            className="flex-1 text-sm border border-border rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500"
+            disabled={loading}
+          />
+          <button
+            type="submit"
+            disabled={loading || !input.trim()}
+            className="rounded-md bg-blue-600 text-white px-4 py-2 text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-40"
+          >
+            Send
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function LessonPage() {
@@ -706,6 +1039,14 @@ export default function LessonPage() {
       {/* Top bar */}
       <div className="flex items-center justify-between px-6 py-2.5 border-b border-border bg-white z-10 flex-shrink-0">
         <div className="flex items-center gap-4">
+          <Link
+            href={`/course/${courseId}/overview`}
+            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6" /></svg>
+            Course
+          </Link>
+          <div className="w-px h-5 bg-border" />
           <span className="text-sm font-medium truncate max-w-[300px]">{lesson?.title}</span>
           <span className="text-xs text-muted-foreground bg-muted rounded-full px-2.5 py-0.5">
             {currentIndex + 1} / {slides.length}
@@ -718,6 +1059,7 @@ export default function LessonPage() {
           >
             Notes (N)
           </button>
+          <ExportDropdown slides={slides} lessonTitle={lesson?.title || "lesson"} />
           {lesson?.status !== "completed" && (
             <button onClick={markComplete} className="rounded-md bg-emerald-600 text-white px-4 py-1.5 text-xs font-medium hover:bg-emerald-700 transition-colors">
               Mark Complete
@@ -737,58 +1079,71 @@ export default function LessonPage() {
         <div className="h-full transition-all duration-500 ease-out" style={{ width: `${progress}%`, background: tokens.accent }} />
       </div>
 
-      {/* Slide */}
-      <div className="flex-1 min-h-0 cursor-pointer" onClick={goNext}>
-        <SlideRenderer slide={slide} index={currentIndex} total={slides.length} />
-      </div>
-
-      {/* Speaker notes */}
-      {showNotes && slide.speaker_notes && (
-        <div className="flex-shrink-0 border-t border-border bg-amber-50 px-6 py-3 max-h-28 overflow-y-auto">
-          <p className="text-xs font-semibold text-amber-800 mb-1">Speaker Notes</p>
-          <p className="text-sm text-amber-900/80">{slide.speaker_notes}</p>
-        </div>
-      )}
-
-      {/* Navigation */}
-      <div className="flex items-center justify-between px-6 py-3 border-t border-border bg-white flex-shrink-0">
-        <button
-          onClick={(e) => { e.stopPropagation(); goPrev(); }}
-          disabled={currentIndex === 0}
-          className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6" /></svg>
-          Previous
-        </button>
-
-        {/* Progress dots */}
-        <div className="flex gap-1.5">
-          {slides.map((_, i) => (
-            <button
-              key={i}
-              onClick={(e) => { e.stopPropagation(); setCurrentIndex(i); }}
-              style={{
-                width: i === currentIndex ? 24 : 8,
-                height: 8,
-                borderRadius: 99,
-                background: i === currentIndex ? tokens.accent : i < currentIndex ? tokens.accentAlpha(0.4) : tokens.mid,
-                transition: "all 0.3s",
-                border: "none",
-                cursor: "pointer",
-                padding: 0,
-              }}
-            />
-          ))}
+      {/* Slide + Chat split */}
+      <div className="flex-1 min-h-0 flex flex-col">
+        {/* Slide area — constrained height */}
+        <div className="flex-shrink-0 cursor-pointer" style={{ height: "55vh" }} onClick={goNext}>
+          <SlideRenderer slide={slide} index={currentIndex} total={slides.length} />
         </div>
 
-        <button
-          onClick={(e) => { e.stopPropagation(); goNext(); }}
-          disabled={currentIndex === slides.length - 1}
-          className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
-        >
-          Next
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6" /></svg>
-        </button>
+        {/* Speaker notes */}
+        {showNotes && slide.speaker_notes && (
+          <div className="flex-shrink-0 border-t border-border bg-amber-50 px-6 py-3 max-h-24 overflow-y-auto">
+            <p className="text-xs font-semibold text-amber-800 mb-1">Speaker Notes</p>
+            <p className="text-sm text-amber-900/80">{slide.speaker_notes}</p>
+          </div>
+        )}
+
+        {/* Navigation */}
+        <div className="flex items-center justify-between px-6 py-2 border-t border-border bg-white flex-shrink-0">
+          <button
+            onClick={(e) => { e.stopPropagation(); goPrev(); }}
+            disabled={currentIndex === 0}
+            className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6" /></svg>
+            Previous
+          </button>
+
+          {/* Progress dots */}
+          <div className="flex gap-1.5">
+            {slides.map((_, i) => (
+              <button
+                key={i}
+                onClick={(e) => { e.stopPropagation(); setCurrentIndex(i); }}
+                style={{
+                  width: i === currentIndex ? 24 : 8,
+                  height: 8,
+                  borderRadius: 99,
+                  background: i === currentIndex ? tokens.accent : i < currentIndex ? tokens.accentAlpha(0.4) : tokens.mid,
+                  transition: "all 0.3s",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: 0,
+                }}
+              />
+            ))}
+          </div>
+
+          <button
+            onClick={(e) => { e.stopPropagation(); goNext(); }}
+            disabled={currentIndex === slides.length - 1}
+            className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+          >
+            Next
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6" /></svg>
+          </button>
+        </div>
+
+        {/* AI Chat Panel */}
+        <div className="flex-1 min-h-0 border-t border-border">
+          <LessonChat
+            courseId={courseId}
+            lessonId={lessonId}
+            currentSlide={slide}
+            lessonTitle={lesson?.title || ""}
+          />
+        </div>
       </div>
     </div>
   );
